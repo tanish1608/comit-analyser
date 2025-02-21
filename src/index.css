@@ -1,0 +1,107 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom styles */
+.stats-container {
+  @apply bg-white rounded-lg shadow-lg p-6 max-w-7xl mx-auto;
+}
+
+.stats-header {
+  @apply flex items-center gap-3 mb-6;
+}
+
+.stats-header h2 {
+  @apply text-2xl font-bold text-gray-900;
+}
+
+.stats-grid {
+  @apply grid grid-cols-1 md:grid-cols-3 gap-6 mb-8;
+}
+
+.stat-card {
+  @apply bg-gray-50 rounded-lg p-6 border border-gray-200;
+}
+
+.stat-card-header {
+  @apply flex items-center gap-2 mb-3;
+}
+
+.stat-card-header h3 {
+  @apply text-lg font-semibold text-gray-700;
+}
+
+.stat-number {
+  @apply text-3xl font-bold text-indigo-600;
+}
+
+.author-stats {
+  @apply mt-8;
+}
+
+.author-stats h3 {
+  @apply text-xl font-semibold text-gray-900 mb-4;
+}
+
+.author-card {
+  @apply bg-gray-50 rounded-lg p-4 mb-4 border border-gray-200;
+}
+
+.author-info {
+  @apply flex justify-between items-center mb-3;
+}
+
+.author-name {
+  @apply text-lg font-medium text-gray-900;
+}
+
+.commit-count {
+  @apply text-indigo-600 font-semibold;
+}
+
+.progress-bar {
+  @apply bg-gray-200 rounded-full h-2 overflow-hidden;
+}
+
+.progress-fill {
+  @apply bg-indigo-600 h-full transition-all duration-300;
+}
+
+/* Form styles */
+.form-container {
+  @apply max-w-7xl mx-auto mb-8;
+}
+
+.input-group {
+  @apply flex-1;
+}
+
+.input-wrapper {
+  @apply relative flex items-center gap-4;
+}
+
+.input-field {
+  @apply w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-transparent;
+}
+
+.select-field {
+  @apply px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-transparent;
+}
+
+.submit-button {
+  @apply px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+/* Loading state */
+.loading {
+  @apply flex items-center justify-center p-8 text-gray-600;
+}
+
+.loading svg {
+  @apply animate-spin mr-3 text-indigo-600;
+}
+
+/* Error message */
+.error {
+  @apply bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg mb-6;
+}
