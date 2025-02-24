@@ -1,11 +1,14 @@
 import axios from 'axios';
 import { Repository, Commit, Branch } from './types';
 
-const github = axios.create({
+const createGithubClient = (token?: string) => axios.create({
   baseURL: 'https://api.github.com',
   params: {
     per_page: '100',
   },
+  headers: token ? {
+    Authorization: `Bearer ${token}`,
+  } : {},
 });
 
 const silentFetch = async <T>(promise: Promise<T>): Promise<T | []> => {
@@ -19,16 +22,18 @@ const silentFetch = async <T>(promise: Promise<T>): Promise<T | []> => {
 
 const fetchAllPages = async <T>(
   url: string,
+  token?: string,
   params: Record<string, string> = {}
 ): Promise<T[]> => {
+  const github = createGithubClient(token);
   let page = 1;
   let allData: T[] = [];
   
   while (true) {
-    const response = await silentFetch(
+    const result = await silentFetch(
       github.get<T[]>(url, { params: { ...params, page: page.toString() } })
     );
-    const data = Array.isArray(response) ? [] : response.data;
+    const data = 'data' in result ? result.data : [];
     
     if (!data.length) break;
     allData = allData.concat(data);
@@ -41,18 +46,20 @@ const fetchAllPages = async <T>(
   return allData;
 };
 
-export const fetchOrgRepos = async (org: string): Promise<Repository[]> => {
-  return fetchAllPages<Repository>(`/orgs/${org}/repos`);
+export const fetchOrgRepos = async (org: string, token?: string): Promise<Repository[]> => {
+  return fetchAllPages<Repository>(`/orgs/${org}/repos`, token);
 };
 
-export const fetchRepoBranches = async (fullName: string): Promise<Branch[]> => {
-  return fetchAllPages<Branch>(`/repos/${fullName}/branches`);
+export const fetchRepoBranches = async (fullName: string, token?: string): Promise<Branch[]> => {
+  return fetchAllPages<Branch>(`/repos/${fullName}/branches`, token);
 };
 
 export const fetchBranchCommits = async (
   fullName: string,
   branch: Branch,
-  since?: Date
+  token?: string,
+  since?: Date,
+  until?: Date
 ): Promise<Commit[]> => {
   const params: Record<string, string> = {
     sha: branch.commit.sha,
@@ -61,19 +68,25 @@ export const fetchBranchCommits = async (
   if (since) {
     params.since = since.toISOString();
   }
+  
+  if (until) {
+    params.until = until.toISOString();
+  }
 
-  return fetchAllPages<Commit>(`/repos/${fullName}/commits`, params);
+  return fetchAllPages<Commit>(`/repos/${fullName}/commits`, token, params);
 };
 
 export const fetchAllRepoCommits = async (
   repo: Repository,
-  since?: Date
+  token?: string,
+  since?: Date,
+  until?: Date
 ): Promise<{ commits: Commit[]; branches: Branch[] }> => {
-  const branches = await fetchRepoBranches(repo.full_name);
+  const branches = await fetchRepoBranches(repo.full_name, token);
   
   // Fetch commits for each branch in parallel
   const commitsPromises = branches.map(branch => 
-    fetchBranchCommits(repo.full_name, branch, since)
+    fetchBranchCommits(repo.full_name, branch, token, since, until)
   );
   
   const results = await Promise.allSettled(commitsPromises);

@@ -2,32 +2,48 @@ import React, { useState } from 'react';
 import { useQuery } from 'react-query';
 import { fetchOrgRepos, fetchAllRepoCommits } from './api';
 import { CommitStats } from './components/CommitStats';
-import { Github, Loader2, Search, Calendar } from 'lucide-react';
-import { TimeRange, UserStats } from './types';
+import { Github, Loader2, Search, Calendar, Key, GitFork } from 'lucide-react';
+import { Repository, UserStats } from './types';
+import DateRangePicker from '@wojtekmaj/react-daterange-picker';
+import type { Value } from '@wojtekmaj/react-daterange-picker';
 import { subDays } from 'date-fns';
+import 'react-calendar/dist/Calendar.css';
 
 function App() {
   const [org, setOrg] = useState('');
   const [selectedOrg, setSelectedOrg] = useState('');
-  const [timeRange, setTimeRange] = useState<TimeRange>('30');
+  const [token, setToken] = useState('');
+  const [dateRange, setDateRange] = useState<Value>([subDays(new Date(), 30), new Date()]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [repoInput, setRepoInput] = useState('');
 
-  const getSinceDate = (range: TimeRange): Date | undefined => {
-    if (range === 'all') return undefined;
-    return subDays(new Date(), parseInt(range));
-  };
+  const dateRangePresets = {
+    'Last 7 days': [subDays(new Date(), 7), new Date()],
+    'Last 14 days': [subDays(new Date(), 14), new Date()],
+    'Last 30 days': [subDays(new Date(), 30), new Date()],
+    'Last 90 days': [subDays(new Date(), 90), new Date()],
+  } as const;
+
+  const selectedRepos = repoInput
+    .split(',')
+    .map(repo => repo.trim())
+    .filter(Boolean);
 
   const {
     data: repos,
     isLoading: isLoadingRepos,
     refetch: refetchRepos,
   } = useQuery(
-    ['repos', selectedOrg],
-    () => fetchOrgRepos(selectedOrg),
+    ['repos', selectedOrg, token],
+    () => fetchOrgRepos(selectedOrg, token),
     {
       enabled: false,
-      retry: false,
-      onError: () => {}, // Suppress error handling
+      retry: 1,
+      retryDelay: 1000,
+      onError: (error) => {
+        console.error('Error fetching repos:', error);
+        setIsAnalyzing(false);
+      },
     }
   );
 
@@ -36,14 +52,26 @@ function App() {
     isLoading: isLoadingCommits,
     refetch: refetchCommits,
   } = useQuery(
-    ['commits', selectedOrg, repos, timeRange],
+    ['commits', selectedOrg, selectedRepos, dateRange, token],
     async () => {
       if (!repos?.length) return { commits: [], userStats: {} };
-      const sinceDate = getSinceDate(timeRange);
       
-      // Fetch commits for all repos in parallel
+      const filteredRepos = repos.filter(repo => 
+        selectedRepos.length === 0 || selectedRepos.includes(repo.name)
+      );
+      
       const repoResults = await Promise.all(
-        repos.map(repo => fetchAllRepoCommits(repo, sinceDate))
+        filteredRepos.map(repo => 
+          fetchAllRepoCommits(
+            repo,
+            token,
+            dateRange?.[0] as Date,
+            dateRange?.[1] as Date
+          ).catch(error => {
+            console.error(`Error fetching commits for ${repo.name}:`, error);
+            return { commits: [], branches: [] };
+          })
+        )
       );
       
       const allCommits = [];
@@ -51,11 +79,10 @@ function App() {
       
       for (let i = 0; i < repoResults.length; i++) {
         const { commits, branches } = repoResults[i];
-        const repo = repos[i];
+        const repo = filteredRepos[i];
         
         allCommits.push(...commits);
         
-        // Aggregate user statistics
         commits.forEach(commit => {
           const author = commit.author?.login || commit.commit.author.name;
           
@@ -77,7 +104,6 @@ function App() {
           
           userStats[author].repositories[repo.name].commits++;
           
-          // Add unique branches
           const repoBranches = branches
             .filter(branch => 
               commits.some(c => c.sha === branch.commit.sha)
@@ -97,8 +123,12 @@ function App() {
     },
     {
       enabled: false,
-      retry: false,
-      onError: () => {}, // Suppress error handling
+      retry: 1,
+      retryDelay: 1000,
+      onError: (error) => {
+        console.error('Error fetching commits:', error);
+        setIsAnalyzing(false);
+      },
     }
   );
 
@@ -110,10 +140,12 @@ function App() {
     setSelectedOrg(org);
 
     try {
-      await refetchRepos();
-      await refetchCommits();
-    } catch {
-      // Suppress any errors
+      const reposResult = await refetchRepos();
+      if (reposResult.data?.length) {
+        await refetchCommits();
+      }
+    } catch (error) {
+      console.error('Analysis error:', error);
     } finally {
       setIsAnalyzing(false);
     }
@@ -131,9 +163,9 @@ function App() {
           </h1>
         </div>
 
-        <form onSubmit={handleSubmit} className="mb-8">
-          <div className="flex gap-4">
-            <div className="flex-1">
+        <form onSubmit={handleSubmit} className="mb-8 space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
               <label
                 htmlFor="org"
                 className="block text-sm font-medium text-gray-700 mb-2"
@@ -153,44 +185,113 @@ function App() {
                 />
               </div>
             </div>
+
             <div>
               <label
-                htmlFor="timeRange"
+                htmlFor="token"
                 className="block text-sm font-medium text-gray-700 mb-2"
               >
-                Time Range
+                GitHub Token (Optional)
               </label>
               <div className="relative">
-                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <select
-                  id="timeRange"
-                  value={timeRange}
-                  onChange={(e) => setTimeRange(e.target.value as TimeRange)}
-                  className="select-field pl-10"
+                <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <input
+                  type="password"
+                  id="token"
+                  value={token}
+                  onChange={(e) => setToken(e.target.value)}
+                  placeholder="Enter GitHub token for private repos"
+                  className="input-field pl-10"
                   disabled={isLoading}
-                >
-                  <option value="7">Last 7 days</option>
-                  <option value="10">Last 10 days</option>
-                  <option value="30">Last 30 days</option>
-                  <option value="all">All time</option>
-                </select>
+                />
               </div>
             </div>
-            <button
-              type="submit"
-              disabled={!org || isLoading}
-              className="submit-button self-end flex items-center"
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                  Analyzing...
-                </>
-              ) : (
-                'Analyze'
-              )}
-            </button>
           </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Date Range
+            </label>
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(dateRangePresets).map(([label, range]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => setDateRange(range)}
+                    className={`px-3 py-1.5 text-sm rounded-full border transition-colors ${
+                      dateRange?.[0] === range[0] && dateRange?.[1] === range[1]
+                        ? 'bg-indigo-100 border-indigo-300 text-indigo-700'
+                        : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="relative">
+                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                <DateRangePicker
+                  value={dateRange}
+                  onChange={setDateRange}
+                  className="date-picker-wrapper"
+                  format="y-MM-dd"
+                  clearIcon={null}
+                  disabled={isLoading}
+                  minDate={subDays(new Date(), 365)}
+                  maxDate={new Date()}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label
+              htmlFor="repos"
+              className="block text-sm font-medium text-gray-700 mb-2"
+            >
+              Repository Names (Optional)
+            </label>
+            <div className="relative">
+              <GitFork className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+              <input
+                type="text"
+                id="repos"
+                value={repoInput}
+                onChange={(e) => setRepoInput(e.target.value)}
+                placeholder="Enter repository names separated by commas (e.g., repo1, repo2)"
+                className="input-field pl-10"
+                disabled={isLoading}
+              />
+            </div>
+            {selectedRepos.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {selectedRepos.map(repo => (
+                  <span
+                    key={repo}
+                    className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800"
+                  >
+                    {repo}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <button
+            type="submit"
+            disabled={!org || isLoading}
+            className="submit-button"
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                Analyzing...
+              </>
+            ) : (
+              'Analyze'
+            )}
+          </button>
         </form>
 
         {isLoading && (
@@ -203,7 +304,7 @@ function App() {
         {repoData?.commits && repoData.commits.length > 0 && (
           <CommitStats
             commits={repoData.commits}
-            timeRange={timeRange}
+            dateRange={dateRange}
             userStats={repoData.userStats}
           />
         )}

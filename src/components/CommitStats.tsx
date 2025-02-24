@@ -1,20 +1,19 @@
 import React from 'react';
-import { Commit, TimeRange, UserStats } from '../types';
+import { Commit, UserStats } from '../types';
 import { BarChart2, GitCommit, Users, Calendar, GitBranch, GitFork } from 'lucide-react';
+type Value = [Date | null, Date | null] | null;
+import { format } from 'date-fns';
 
 interface CommitStatsProps {
   commits: Commit[];
-  timeRange: TimeRange;
+  dateRange: Value;
   userStats: Record<string, UserStats>;
 }
 
-export const CommitStats: React.FC<CommitStatsProps> = ({ commits, timeRange, userStats }) => {
-  const timeRangeText = {
-    '7': 'Last 7 days',
-    '10': 'Last 10 days',
-    '30': 'Last 30 days',
-    'all': 'All time'
-  }[timeRange];
+export const CommitStats: React.FC<CommitStatsProps> = ({ commits, dateRange, userStats }) => {
+  const dateRangeText = dateRange
+    ? `${format(dateRange[0] as Date, 'MMM dd, yyyy')} - ${format(dateRange[1] as Date, 'MMM dd, yyyy')}`
+    : 'All time';
 
   const sortedUsers = Object.entries(userStats)
     .sort(([, a], [, b]) => b.totalCommits - a.totalCommits);
@@ -48,7 +47,7 @@ export const CommitStats: React.FC<CommitStatsProps> = ({ commits, timeRange, us
             <Calendar className="w-5 h-5 text-indigo-600" />
             <h3>Time Range</h3>
           </div>
-          <p className="text-xl font-semibold text-gray-800">{timeRangeText}</p>
+          <p className="text-xl font-semibold text-gray-800">{dateRangeText}</p>
         </div>
       </div>
 
