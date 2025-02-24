@@ -6,6 +6,9 @@ export interface Repository {
 
 export interface Branch {
   name: string;
+  commit: {
+    sha: string;
+  };
 }
 
 export interface Commit {
@@ -22,6 +25,16 @@ export interface Commit {
     login: string;
     avatar_url: string;
   } | null;
+}
+
+export interface UserStats {
+  totalCommits: number;
+  repositories: {
+    [repoName: string]: {
+      commits: number;
+      branches: string[];
+    };
+  };
 }
 
 export type TimeRange = '7' | '10' | '30' | 'all';

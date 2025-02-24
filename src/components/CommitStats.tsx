@@ -1,28 +1,23 @@
 import React from 'react';
-import { Commit, TimeRange } from '../types';
-import { BarChart2, GitCommit, Users, Calendar } from 'lucide-react';
+import { Commit, TimeRange, UserStats } from '../types';
+import { BarChart2, GitCommit, Users, Calendar, GitBranch, GitFork } from 'lucide-react';
 
 interface CommitStatsProps {
   commits: Commit[];
   timeRange: TimeRange;
+  userStats: Record<string, UserStats>;
 }
 
-export const CommitStats: React.FC<CommitStatsProps> = ({ commits, timeRange }) => {
-  const commitsByAuthor = commits.reduce((acc, commit) => {
-    const author = commit.author?.login || commit.commit.author.name;
-    acc[author] = (acc[author] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
-
-  const sortedAuthors = Object.entries(commitsByAuthor)
-    .sort(([, a], [, b]) => b - a);
-
+export const CommitStats: React.FC<CommitStatsProps> = ({ commits, timeRange, userStats }) => {
   const timeRangeText = {
     '7': 'Last 7 days',
     '10': 'Last 10 days',
     '30': 'Last 30 days',
     'all': 'All time'
   }[timeRange];
+
+  const sortedUsers = Object.entries(userStats)
+    .sort(([, a], [, b]) => b.totalCommits - a.totalCommits);
 
   return (
     <div className="stats-container">
@@ -37,7 +32,7 @@ export const CommitStats: React.FC<CommitStatsProps> = ({ commits, timeRange }) 
             <Users className="w-5 h-5 text-indigo-600" />
             <h3>Contributors</h3>
           </div>
-          <p className="stat-number">{Object.keys(commitsByAuthor).length}</p>
+          <p className="stat-number">{Object.keys(userStats).length}</p>
         </div>
 
         <div className="stat-card">
@@ -57,22 +52,40 @@ export const CommitStats: React.FC<CommitStatsProps> = ({ commits, timeRange }) 
         </div>
       </div>
 
-      <div className="author-stats">
-        <h3>Commits by Author</h3>
-        <div>
-          {sortedAuthors.map(([author, count]) => (
-            <div key={author} className="author-card">
-              <div className="author-info">
-                <span className="author-name">{author}</span>
-                <span className="commit-count">{count} commits</span>
+      <div className="mt-8">
+        <h3 className="text-xl font-semibold text-gray-900 mb-4">Detailed User Statistics</h3>
+        <div className="space-y-6">
+          {sortedUsers.map(([author, stats]) => (
+            <div key={author} className="bg-white rounded-lg shadow p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h4 className="text-lg font-semibold text-gray-900">{author}</h4>
+                <span className="text-indigo-600 font-semibold">
+                  {stats.totalCommits} total commits
+                </span>
               </div>
-              <div className="progress-bar">
-                <div
-                  className="progress-fill"
-                  style={{
-                    width: `${(count / commits.length) * 100}%`,
-                  }}
-                />
+              
+              <div className="space-y-4">
+                {Object.entries(stats.repositories).map(([repo, repoStats]) => (
+                  <div key={repo} className="bg-gray-50 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <GitFork className="w-4 h-4 text-gray-600" />
+                        <span className="font-medium text-gray-900">{repo}</span>
+                      </div>
+                      <span className="text-indigo-600 font-medium">
+                        {repoStats.commits} commits
+                      </span>
+                    </div>
+                    
+                    <div className="flex items-center gap-2 text-sm text-gray-600">
+                      <GitBranch className="w-4 h-4" />
+                      <span>Active in {repoStats.branches.length} branches: </span>
+                      <span className="font-medium">
+                        {repoStats.branches.join(', ')}
+                      </span>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           ))}

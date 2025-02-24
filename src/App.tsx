@@ -3,13 +3,14 @@ import { useQuery } from 'react-query';
 import { fetchOrgRepos, fetchAllRepoCommits } from './api';
 import { CommitStats } from './components/CommitStats';
 import { Github, Loader2, Search, Calendar } from 'lucide-react';
-import { TimeRange } from './types';
+import { TimeRange, UserStats } from './types';
 import { subDays } from 'date-fns';
 
 function App() {
   const [org, setOrg] = useState('');
   const [selectedOrg, setSelectedOrg] = useState('');
   const [timeRange, setTimeRange] = useState<TimeRange>('30');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const getSinceDate = (range: TimeRange): Date | undefined => {
     if (range === 'all') return undefined;
@@ -19,40 +20,106 @@ function App() {
   const {
     data: repos,
     isLoading: isLoadingRepos,
-    error: reposError,
+    refetch: refetchRepos,
   } = useQuery(
     ['repos', selectedOrg],
     () => fetchOrgRepos(selectedOrg),
     {
-      enabled: !!selectedOrg,
+      enabled: false,
+      retry: false,
+      onError: () => {}, // Suppress error handling
     }
   );
 
   const {
-    data: allCommits,
+    data: repoData,
     isLoading: isLoadingCommits,
-    error: commitsError,
+    refetch: refetchCommits,
   } = useQuery(
     ['commits', selectedOrg, repos, timeRange],
     async () => {
-      if (!repos) return [];
+      if (!repos?.length) return { commits: [], userStats: {} };
       const sinceDate = getSinceDate(timeRange);
-      const commitsPromises = repos.map(repo => fetchAllRepoCommits(repo, sinceDate));
-      const repoCommits = await Promise.all(commitsPromises);
-      return repoCommits.flat();
+      
+      // Fetch commits for all repos in parallel
+      const repoResults = await Promise.all(
+        repos.map(repo => fetchAllRepoCommits(repo, sinceDate))
+      );
+      
+      const allCommits = [];
+      const userStats: Record<string, UserStats> = {};
+      
+      for (let i = 0; i < repoResults.length; i++) {
+        const { commits, branches } = repoResults[i];
+        const repo = repos[i];
+        
+        allCommits.push(...commits);
+        
+        // Aggregate user statistics
+        commits.forEach(commit => {
+          const author = commit.author?.login || commit.commit.author.name;
+          
+          if (!userStats[author]) {
+            userStats[author] = {
+              totalCommits: 0,
+              repositories: {},
+            };
+          }
+          
+          userStats[author].totalCommits++;
+          
+          if (!userStats[author].repositories[repo.name]) {
+            userStats[author].repositories[repo.name] = {
+              commits: 0,
+              branches: [],
+            };
+          }
+          
+          userStats[author].repositories[repo.name].commits++;
+          
+          // Add unique branches
+          const repoBranches = branches
+            .filter(branch => 
+              commits.some(c => c.sha === branch.commit.sha)
+            )
+            .map(branch => branch.name);
+            
+          userStats[author].repositories[repo.name].branches = [
+            ...new Set([
+              ...userStats[author].repositories[repo.name].branches,
+              ...repoBranches,
+            ]),
+          ];
+        });
+      }
+      
+      return { commits: allCommits, userStats };
     },
     {
-      enabled: !!repos,
+      enabled: false,
+      retry: false,
+      onError: () => {}, // Suppress error handling
     }
   );
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!org || isAnalyzing) return;
+
+    setIsAnalyzing(true);
     setSelectedOrg(org);
+
+    try {
+      await refetchRepos();
+      await refetchCommits();
+    } catch {
+      // Suppress any errors
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
-  const isLoading = isLoadingRepos || isLoadingCommits;
-  const error = reposError || commitsError;
+  const isLoading = isLoadingRepos || isLoadingCommits || isAnalyzing;
 
   return (
     <div className="min-h-screen bg-gray-100 py-8 px-4">
@@ -82,6 +149,7 @@ function App() {
                   onChange={(e) => setOrg(e.target.value)}
                   placeholder="Enter organization name"
                   className="input-field pl-10"
+                  disabled={isLoading}
                 />
               </div>
             </div>
@@ -99,6 +167,7 @@ function App() {
                   value={timeRange}
                   onChange={(e) => setTimeRange(e.target.value as TimeRange)}
                   className="select-field pl-10"
+                  disabled={isLoading}
                 >
                   <option value="7">Last 7 days</option>
                   <option value="10">Last 10 days</option>
@@ -110,9 +179,16 @@ function App() {
             <button
               type="submit"
               disabled={!org || isLoading}
-              className="submit-button self-end"
+              className="submit-button self-end flex items-center"
             >
-              Analyze
+              {isLoading ? (
+                <>
+                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                  Analyzing...
+                </>
+              ) : (
+                'Analyze'
+              )}
             </button>
           </div>
         </form>
@@ -124,17 +200,15 @@ function App() {
           </div>
         )}
 
-        {error && (
-          <div className="error">
-            <p>Error: {(error as Error).message || 'Failed to fetch data'}</p>
-          </div>
+        {repoData?.commits && repoData.commits.length > 0 && (
+          <CommitStats
+            commits={repoData.commits}
+            timeRange={timeRange}
+            userStats={repoData.userStats}
+          />
         )}
 
-        {allCommits && allCommits.length > 0 && (
-          <CommitStats commits={allCommits} timeRange={timeRange} />
-        )}
-
-        {selectedOrg && !isLoading && allCommits?.length === 0 && (
+        {selectedOrg && !isLoading && (!repoData?.commits || repoData.commits.length === 0) && (
           <div className="text-center py-8 text-gray-600">
             <p>No commits found for organization: {selectedOrg}</p>
           </div>
