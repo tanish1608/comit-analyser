@@ -30,10 +30,10 @@ const fetchAllPages = async <T>(
   let allData: T[] = [];
   
   while (true) {
-    const result = await silentFetch(
+    const response = await silentFetch(
       github.get<T[]>(url, { params: { ...params, page: page.toString() } })
     );
-    const data = 'data' in result ? result.data : [];
+    const data = Array.isArray(response) ? response : response.data;
     
     if (!data.length) break;
     allData = allData.concat(data);

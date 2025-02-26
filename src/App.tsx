@@ -2,27 +2,39 @@ import React, { useState } from 'react';
 import { useQuery } from 'react-query';
 import { fetchOrgRepos, fetchAllRepoCommits } from './api';
 import { CommitStats } from './components/CommitStats';
-import { Github, Loader2, Search, Calendar, Key, GitFork } from 'lucide-react';
-import { Repository, UserStats } from './types';
-import DateRangePicker from '@wojtekmaj/react-daterange-picker';
-import type { Value } from '@wojtekmaj/react-daterange-picker';
-import { subDays } from 'date-fns';
-import 'react-calendar/dist/Calendar.css';
+import { Github, Loader2, Search, Calendar, Key, GitFork, AlertCircle } from 'lucide-react';
+import { UserStats } from './types';
+import { DateRangePicker } from 'rsuite';
+import { subDays, startOfDay, endOfDay } from 'date-fns';
+import 'rsuite/dist/rsuite.min.css';
 
 function App() {
   const [org, setOrg] = useState('');
   const [selectedOrg, setSelectedOrg] = useState('');
   const [token, setToken] = useState('');
-  const [dateRange, setDateRange] = useState<Value>([subDays(new Date(), 30), new Date()]);
+  const [dateRange, setDateRange] = useState<[Date, Date]>([subDays(new Date(), 30), new Date()]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [repoInput, setRepoInput] = useState('');
+  const [shouldFetchRepos, setShouldFetchRepos] = useState(false);
 
-  const dateRangePresets = {
-    'Last 7 days': [subDays(new Date(), 7), new Date()],
-    'Last 14 days': [subDays(new Date(), 14), new Date()],
-    'Last 30 days': [subDays(new Date(), 30), new Date()],
-    'Last 90 days': [subDays(new Date(), 90), new Date()],
-  } as const;
+  const predefinedRanges = [
+    {
+      label: 'Last 7 days',
+      value: () => [subDays(new Date(), 7), new Date()] as [Date, Date]
+    },
+    {
+      label: 'Last 14 days',
+      value: () => [subDays(new Date(), 14), new Date()] as [Date, Date]
+    },
+    {
+      label: 'Last 30 days',
+      value: () => [subDays(new Date(), 30), new Date()] as [Date, Date]
+    },
+    {
+      label: 'Last 90 days',
+      value: () => [subDays(new Date(), 90), new Date()] as [Date, Date]
+    }
+  ];
 
   const selectedRepos = repoInput
     .split(',')
@@ -32,17 +44,21 @@ function App() {
   const {
     data: repos,
     isLoading: isLoadingRepos,
-    refetch: refetchRepos,
+    error: reposError
   } = useQuery(
     ['repos', selectedOrg, token],
     () => fetchOrgRepos(selectedOrg, token),
     {
-      enabled: false,
+      enabled: shouldFetchRepos && !!selectedOrg,
       retry: 1,
       retryDelay: 1000,
+      onSuccess: () => {
+        setShouldFetchRepos(false);
+      },
       onError: (error) => {
         console.error('Error fetching repos:', error);
         setIsAnalyzing(false);
+        setShouldFetchRepos(false);
       },
     }
   );
@@ -50,7 +66,7 @@ function App() {
   const {
     data: repoData,
     isLoading: isLoadingCommits,
-    refetch: refetchCommits,
+    error: commitsError
   } = useQuery(
     ['commits', selectedOrg, selectedRepos, dateRange, token],
     async () => {
@@ -65,8 +81,8 @@ function App() {
           fetchAllRepoCommits(
             repo,
             token,
-            dateRange?.[0] as Date,
-            dateRange?.[1] as Date
+            startOfDay(dateRange[0]),
+            endOfDay(dateRange[1])
           ).catch(error => {
             console.error(`Error fetching commits for ${repo.name}:`, error);
             return { commits: [], branches: [] };
@@ -122,9 +138,12 @@ function App() {
       return { commits: allCommits, userStats };
     },
     {
-      enabled: false,
+      enabled: !!repos?.length,
       retry: 1,
       retryDelay: 1000,
+      onSuccess: () => {
+        setIsAnalyzing(false);
+      },
       onError: (error) => {
         console.error('Error fetching commits:', error);
         setIsAnalyzing(false);
@@ -138,20 +157,32 @@ function App() {
 
     setIsAnalyzing(true);
     setSelectedOrg(org);
-
-    try {
-      const reposResult = await refetchRepos();
-      if (reposResult.data?.length) {
-        await refetchCommits();
-      }
-    } catch (error) {
-      console.error('Analysis error:', error);
-    } finally {
-      setIsAnalyzing(false);
-    }
+    setShouldFetchRepos(true);
   };
 
   const isLoading = isLoadingRepos || isLoadingCommits || isAnalyzing;
+
+  const getErrorMessage = () => {
+    if (reposError) {
+      const error = reposError as { response?: { status?: number } };
+      if (error.response?.status === 404) {
+        return `Organization "${selectedOrg}" not found. Please check the organization name and try again.`;
+      }
+      if (error.response?.status === 401) {
+        return 'Invalid or missing GitHub token. Please check your token and try again.';
+      }
+      if (error.response?.status === 403) {
+        return 'Rate limit exceeded. Please provide a GitHub token or try again later.';
+      }
+      return 'Failed to fetch repositories. Please try again.';
+    }
+    if (commitsError) {
+      return 'Failed to fetch commit data. Please try again.';
+    }
+    return null;
+  };
+
+  const errorMessage = getErrorMessage();
 
   return (
     <div className="min-h-screen bg-gray-100 py-8 px-4">
@@ -162,6 +193,15 @@ function App() {
             GitHub Organization Commit Analyzer
           </h1>
         </div>
+
+        {errorMessage && (
+          <div className="error">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-5 h-5" />
+              <p>{errorMessage}</p>
+            </div>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="mb-8 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -212,36 +252,21 @@ function App() {
             <label className="block text-sm font-medium text-gray-700 mb-2">
               Date Range
             </label>
-            <div className="space-y-3">
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(dateRangePresets).map(([label, range]) => (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => setDateRange(range)}
-                    className={`px-3 py-1.5 text-sm rounded-full border transition-colors ${
-                      dateRange?.[0] === range[0] && dateRange?.[1] === range[1]
-                        ? 'bg-indigo-100 border-indigo-300 text-indigo-700'
-                        : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <div className="relative">
-                <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                <DateRangePicker
-                  value={dateRange}
-                  onChange={setDateRange}
-                  className="date-picker-wrapper"
-                  format="y-MM-dd"
-                  clearIcon={null}
-                  disabled={isLoading}
-                  minDate={subDays(new Date(), 365)}
-                  maxDate={new Date()}
-                />
-              </div>
+            <div className="relative">
+              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 z-10" />
+              <DateRangePicker
+                value={dateRange}
+                onChange={value => setDateRange(value as [Date, Date])}
+                className="w-full"
+                ranges={predefinedRanges}
+                placeholder="Select date range"
+                character=" - "
+                style={{ width: '100%' }}
+                cleanable={false}
+                disabled={isLoading}
+                placement="bottomStart"
+                shouldDisableDate={date => date > new Date()}
+              />
             </div>
           </div>
 

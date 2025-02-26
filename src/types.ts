@@ -37,4 +37,4 @@ export interface UserStats {
   };
 }
 
-export type TimeRange = '7' | '10' | '30' | 'all';
+// Remove unused TimeRange type since we're using Date objects directly

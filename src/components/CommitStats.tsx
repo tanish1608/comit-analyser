@@ -1,18 +1,17 @@
 import React from 'react';
 import { Commit, UserStats } from '../types';
 import { BarChart2, GitCommit, Users, Calendar, GitBranch, GitFork } from 'lucide-react';
-type Value = [Date | null, Date | null] | null;
 import { format } from 'date-fns';
 
 interface CommitStatsProps {
   commits: Commit[];
-  dateRange: Value;
+  dateRange: [Date, Date];
   userStats: Record<string, UserStats>;
 }
 
 export const CommitStats: React.FC<CommitStatsProps> = ({ commits, dateRange, userStats }) => {
   const dateRangeText = dateRange
-    ? `${format(dateRange[0] as Date, 'MMM dd, yyyy')} - ${format(dateRange[1] as Date, 'MMM dd, yyyy')}`
+    ? `${format(dateRange[0], 'MMM dd, yyyy')} - ${format(dateRange[1], 'MMM dd, yyyy')}`
     : 'All time';
 
   const sortedUsers = Object.entries(userStats)
