@@ -19,7 +19,8 @@
     "react-date-range": "^2.0.1",
     "react-dom": "^18.3.1",
     "react-query": "^3.39.3",
-    "rsuite": "^5.78.0"
+    "rsuite": "^5.78.0",
+    "xlsx": "^0.18.5"
   },
   "dcf": {
     "dns": "https://cdn.skypack.dev"

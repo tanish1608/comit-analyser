@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { Repository, Commit, Branch } from './types';
+import { getFromCache, saveToCache } from './cache';
 
 const createGithubClient = (token?: string) => axios.create({
   baseURL: 'https://api.github.com',
@@ -30,10 +31,9 @@ const fetchAllPages = async <T>(
   let allData: T[] = [];
   
   while (true) {
-    const response = await silentFetch(
+    const { data = [] } = await silentFetch(
       github.get<T[]>(url, { params: { ...params, page: page.toString() } })
     );
-    const data = Array.isArray(response) ? response : response.data;
     
     if (!data.length) break;
     allData = allData.concat(data);
@@ -47,11 +47,45 @@ const fetchAllPages = async <T>(
 };
 
 export const fetchOrgRepos = async (org: string, token?: string): Promise<Repository[]> => {
-  return fetchAllPages<Repository>(`/orgs/${org}/repos`, token);
+  // Generate a cache key based on org and token presence
+  const cacheKey = `org_${org}_${token ? 'auth' : 'noauth'}`;
+  
+  // Try to get from cache first
+  const cachedRepos = getFromCache<Repository[]>('repositories', cacheKey);
+  if (cachedRepos) {
+    console.log(`Using cached repositories for ${org}`);
+    return cachedRepos;
+  }
+  
+  // If not in cache, fetch from API
+  console.log(`Fetching repositories for ${org} from GitHub API`);
+  const repos = await fetchAllPages<Repository>(`/orgs/${org}/repos`, token);
+  
+  // Save to cache
+  saveToCache('repositories', cacheKey, repos);
+  
+  return repos;
 };
 
 export const fetchRepoBranches = async (fullName: string, token?: string): Promise<Branch[]> => {
-  return fetchAllPages<Branch>(`/repos/${fullName}/branches`, token);
+  // Generate a cache key
+  const cacheKey = `branches_${fullName}_${token ? 'auth' : 'noauth'}`;
+  
+  // Try to get from cache first
+  const cachedBranches = getFromCache<Branch[]>('branches', cacheKey);
+  if (cachedBranches) {
+    console.log(`Using cached branches for ${fullName}`);
+    return cachedBranches;
+  }
+  
+  // If not in cache, fetch from API
+  console.log(`Fetching branches for ${fullName} from GitHub API`);
+  const branches = await fetchAllPages<Branch>(`/repos/${fullName}/branches`, token);
+  
+  // Save to cache
+  saveToCache('branches', cacheKey, branches);
+  
+  return branches;
 };
 
 export const fetchBranchCommits = async (
@@ -72,8 +106,27 @@ export const fetchBranchCommits = async (
   if (until) {
     params.until = until.toISOString();
   }
-
-  return fetchAllPages<Commit>(`/repos/${fullName}/commits`, token, params);
+  
+  // Generate a cache key that includes the date range
+  const sinceStr = since ? since.toISOString() : 'none';
+  const untilStr = until ? until.toISOString() : 'none';
+  const cacheKey = `commits_${fullName}_${branch.name}_${sinceStr}_${untilStr}_${token ? 'auth' : 'noauth'}`;
+  
+  // Try to get from cache first
+  const cachedCommits = getFromCache<Commit[]>('commits', cacheKey);
+  if (cachedCommits) {
+    console.log(`Using cached commits for ${fullName}/${branch.name}`);
+    return cachedCommits;
+  }
+  
+  // If not in cache, fetch from API
+  console.log(`Fetching commits for ${fullName}/${branch.name} from GitHub API`);
+  const commits = await fetchAllPages<Commit>(`/repos/${fullName}/commits`, token, params);
+  
+  // Save to cache
+  saveToCache('commits', cacheKey, commits);
+  
+  return commits;
 };
 
 export const fetchAllRepoCommits = async (
