@@ -1,13 +1,10 @@
-// Browser-compatible cache implementation
-// Uses localStorage instead of file system
-
 import { Repository, Commit, Branch } from './types';
 
-// Define cache structure
 interface CacheEntry<T> {
   timestamp: number;
   data: T;
   expiresAt: number;
+  source: 'API' | 'Cache';
 }
 
 interface Cache {
@@ -16,28 +13,61 @@ interface Cache {
   commits: Record<string, CacheEntry<Commit[]>>;
 }
 
-// Cache storage key
-const CACHE_STORAGE_KEY = 'github-cache';
+const CACHE_KEY = 'github-analyzer-cache';
 const CACHE_TTL = 1000 * 60 * 60; // 1 hour in milliseconds
+const MAX_CACHE_SIZE = 50 * 1024 * 1024; // 50MB
 
-// Initialize cache
 let cache: Cache = {
   repositories: {},
   branches: {},
   commits: {},
 };
 
-// Load cache from localStorage
+const getCacheSize = (): number => {
+  try {
+    return new Blob([JSON.stringify(cache)]).size;
+  } catch (error) {
+    console.error('Error calculating cache size:', error);
+    return 0;
+  }
+};
+
+const trimCache = () => {
+  while (getCacheSize() > MAX_CACHE_SIZE) {
+    let oldestTimestamp = Date.now();
+    let oldestType: keyof Cache | null = null;
+    let oldestKey = '';
+    
+    Object.keys(cache).forEach((type) => {
+      const cacheType = type as keyof Cache;
+      Object.entries(cache[cacheType]).forEach(([key, entry]) => {
+        if (entry.timestamp < oldestTimestamp) {
+          oldestTimestamp = entry.timestamp;
+          oldestType = cacheType;
+          oldestKey = key;
+        }
+      });
+    });
+    
+    if (oldestType && oldestKey) {
+      delete cache[oldestType][oldestKey];
+      console.log(`Removed old cache entry: ${oldestType}/${oldestKey}`);
+    } else {
+      break;
+    }
+  }
+};
+
 const loadCache = (): void => {
   try {
-    const storedCache = localStorage.getItem(CACHE_STORAGE_KEY);
-    if (storedCache) {
-      cache = JSON.parse(storedCache);
+    const savedCache = localStorage.getItem(CACHE_KEY);
+    if (savedCache) {
+      cache = JSON.parse(savedCache);
       console.log('Cache loaded from localStorage');
+      trimCache();
     }
   } catch (error) {
     console.error('Error loading cache:', error);
-    // If there's an error loading the cache, we'll start with a fresh one
     cache = {
       repositories: {},
       branches: {},
@@ -46,17 +76,27 @@ const loadCache = (): void => {
   }
 };
 
-// Save cache to localStorage
 const saveCache = (): void => {
   try {
-    localStorage.setItem(CACHE_STORAGE_KEY, JSON.stringify(cache));
+    trimCache();
+    localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
     console.log('Cache saved to localStorage');
   } catch (error) {
-    console.error('Error saving cache:', error);
+    if (error instanceof Error && error.name === 'QuotaExceededError') {
+      console.error('localStorage quota exceeded, clearing old entries');
+      clearExpiredCache();
+      trimCache();
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+      } catch (retryError) {
+        console.error('Failed to save cache even after trimming:', retryError);
+      }
+    } else {
+      console.error('Error saving cache:', error);
+    }
   }
 };
 
-// Get data from cache
 export const getFromCache = <T>(
   cacheType: keyof Cache,
   key: string
@@ -69,7 +109,6 @@ export const getFromCache = <T>(
     return null;
   }
   
-  // Check if cache entry has expired
   if (Date.now() > entry.expiresAt) {
     delete cache[cacheType][key];
     saveCache();
@@ -79,7 +118,6 @@ export const getFromCache = <T>(
   return entry.data;
 };
 
-// Save data to cache
 export const saveToCache = <T>(
   cacheType: keyof Cache,
   key: string,
@@ -91,12 +129,12 @@ export const saveToCache = <T>(
     timestamp: Date.now(),
     data,
     expiresAt: Date.now() + CACHE_TTL,
+    source: 'API'
   };
   
   saveCache();
 };
 
-// Clear expired cache entries
 export const clearExpiredCache = (): void => {
   loadCache();
   
@@ -119,8 +157,6 @@ export const clearExpiredCache = (): void => {
   }
 };
 
-// Initialize cache on module load
 loadCache();
 
-// Clear expired cache entries every hour
 setInterval(clearExpiredCache, CACHE_TTL);

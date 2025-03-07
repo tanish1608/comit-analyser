@@ -4,7 +4,7 @@
 
 /* Custom styles */
 .stats-container {
-  @apply rounded-lg shadow-lg p-6 max-w-7xl mx-auto;
+  @apply bg-white rounded-lg shadow-lg p-6 max-w-7xl mx-auto;
 }
 
 .stats-header {
@@ -12,15 +12,15 @@
 }
 
 .stats-header h2 {
-  @apply text-2xl font-bold;
+  @apply text-2xl font-bold text-gray-900;
 }
 
 .stats-grid {
-  @apply grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 rounded-lg p-4;
+  @apply grid grid-cols-1 md:grid-cols-3 gap-6 mb-8;
 }
 
 .stat-card {
-  @apply rounded-lg p-6 border;
+  @apply bg-gray-50 rounded-lg p-6 border border-gray-200;
 }
 
 .stat-card-header {
@@ -28,11 +28,11 @@
 }
 
 .stat-card-header h3 {
-  @apply text-lg font-semibold;
+  @apply text-lg font-semibold text-gray-700;
 }
 
 .stat-number {
-  @apply text-3xl font-bold;
+  @apply text-3xl font-bold text-indigo-600;
 }
 
 .author-stats {
@@ -40,11 +40,11 @@
 }
 
 .author-stats h3 {
-  @apply text-xl font-semibold mb-4;
+  @apply text-xl font-semibold text-gray-900 mb-4;
 }
 
 .author-card {
-  @apply rounded-lg p-4 mb-4 border;
+  @apply bg-gray-50 rounded-lg p-4 mb-4 border border-gray-200;
 }
 
 .author-info {
@@ -52,19 +52,19 @@
 }
 
 .author-name {
-  @apply text-lg font-medium;
+  @apply text-lg font-medium text-gray-900;
 }
 
 .commit-count {
-  @apply font-semibold;
+  @apply text-indigo-600 font-semibold;
 }
 
 .progress-bar {
-  @apply rounded-full h-2 overflow-hidden;
+  @apply bg-gray-200 rounded-full h-2 overflow-hidden;
 }
 
 .progress-fill {
-  @apply h-full transition-all duration-300;
+  @apply bg-indigo-600 h-full transition-all duration-300;
 }
 
 /* Form styles */
@@ -81,34 +81,34 @@
 }
 
 .input-field {
-  @apply w-full px-4 py-2 rounded-lg border focus:ring-2 focus:ring-indigo-500 focus:border-transparent;
+  @apply w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-transparent;
 }
 
 .select-field {
-  @apply px-4 py-2 rounded-lg border focus:ring-2 focus:ring-indigo-500 focus:border-transparent;
+  @apply px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-transparent;
 }
 
 .submit-button {
-  @apply flex items-center justify-center px-6 py-2 text-white rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+  @apply flex items-center justify-center px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
 }
 
 /* Loading state */
 .loading {
-  @apply flex items-center justify-center p-8;
+  @apply flex items-center justify-center p-8 text-gray-600;
 }
 
 .loading svg {
-  @apply animate-spin mr-3;
+  @apply animate-spin mr-3 text-indigo-600;
 }
 
 /* Error message */
 .error {
-  @apply border p-4 rounded-lg mb-6;
+  @apply bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg mb-6;
 }
 
 /* RSuite DateRangePicker customization */
 .rs-picker-toggle {
-  @apply w-full pl-10 pr-4 py-2 rounded-lg border bg-white !important;
+  @apply w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 bg-white !important;
 }
 
 .rs-picker-toggle:hover,
@@ -121,7 +121,7 @@
 }
 
 .rs-picker-toolbar-ranges {
-  @apply border-b pb-2 mb-2 !important;
+  @apply border-b border-gray-200 pb-2 mb-2 !important;
 }
 
 .rs-picker-toolbar-right-btn-ok {
@@ -129,7 +129,7 @@
 }
 
 .rs-picker-menu {
-  @apply shadow-lg border !important;
+  @apply shadow-lg border border-gray-200 !important;
 }
 
 .rs-calendar-table-cell-selected .rs-calendar-table-cell-content {
@@ -140,68 +140,11 @@
   @apply bg-indigo-50 !important;
 }
 
-/* Dark mode styles for RSuite */
-.dark .rs-picker-toggle {
-  @apply bg-gray-700 border-gray-600 text-white !important;
+/* Chart customizations */
+canvas {
+  @apply max-w-full;
 }
 
-.dark .rs-picker-toggle-placeholder {
-  @apply text-gray-400 !important;
+.chart-container {
+  @apply bg-white p-6 rounded-lg shadow;
 }
-
-.dark .rs-picker-toggle-value {
-  @apply text-white !important;
-}
-
-.dark .rs-picker-menu {
-  @apply bg-gray-800 border-gray-700 !important;
-}
-
-.dark .rs-calendar-header {
-  @apply bg-gray-800 text-white !important;
-}
-
-.dark .rs-calendar-table-cell-content {
-  @apply text-gray-300 !important;
-}
-
-.dark .rs-calendar-table-cell:hover .rs-calendar-table-cell-content {
-  @apply bg-gray-700 !important;
-}
-
-.dark .rs-calendar-table-cell-selected .rs-calendar-table-cell-content {
-  @apply bg-indigo-600 text-white !important;
-}
-
-.dark .rs-calendar-table-cell-in-range::before {
-  @apply bg-indigo-900 !important;
-}
-
-.dark .rs-picker-toolbar {
-  @apply bg-gray-800 border-gray-700 !important;
-}
-
-.dark .rs-picker-toolbar-ranges-item {
-  @apply text-gray-300 !important;
-}
-
-.dark .rs-picker-toolbar-ranges-item:hover {
-  @apply text-white !important;
-}
-
-.dark .rs-btn-subtle {
-  @apply text-gray-300 !important;
-}
-
-.dark .rs-btn-subtle:hover {
-  @apply bg-gray-700 !important;
-}
-
-.dark .rs-picker-toolbar-right-btn-ok {
-  @apply bg-indigo-600 text-white hover:bg-indigo-700 !important;
-}
-
-/* Transition for dark mode */
-/* .dark .transition-colors {
-  @apply transition-colors duration-200;
-} */
