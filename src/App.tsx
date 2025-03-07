@@ -3,7 +3,7 @@ import { useQuery } from 'react-query';
 import { fetchOrgRepos, fetchAllRepoCommits } from './api';
 import { CommitStats } from './components/CommitStats';
 import { Github, Loader2, Search, Calendar, Key, GitFork, AlertCircle, Database } from 'lucide-react';
-import { Repository, UserStats, CacheStatus } from './types';
+import { UserStats, CacheStatus } from './types';
 import { DateRangePicker } from 'rsuite';
 import { subDays, startOfDay, endOfDay, formatDistanceToNow } from 'date-fns';
 import 'rsuite/dist/rsuite.min.css';
@@ -234,7 +234,7 @@ function App() {
   );
 
   useEffect(() => {
-    if (repos?.length > 0) {
+    if (repos && repos.length > 0) {
       refetchCommits();
     }
   }, [repos, refetchCommits]);

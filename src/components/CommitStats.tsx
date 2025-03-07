@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Commit, UserStats, Employee } from '../types';
-import { BarChart2, GitCommit, Users, Calendar, GitBranch, GitFork, FileDown, Clock } from 'lucide-react';
+import { BarChart2, GitCommit, Users, Calendar, GitBranch, GitFork, FileDown } from 'lucide-react';
 import { format, parseISO, differenceInDays, startOfDay, endOfDay } from 'date-fns';
 import { utils, writeFile } from 'xlsx';
 import { fetchEmployeeNames } from '../api';
@@ -113,8 +113,15 @@ export const CommitStats: React.FC<CommitStatsProps> = ({ commits, dateRange, us
     
     const summaryWs = utils.json_to_sheet(summaryData);
     utils.book_append_sheet(wb, summaryWs, 'Summary');
-    
-    const detailedData: any[] = [];
+    // const detailedData: any[] = [];
+
+    const detailedData: {
+      'Author ID': string;
+      'Author Name': string;
+      'Repository': string;
+      'Commits': number; // string?
+      'Branches': string;
+    }[] = [];
     
     sortedUsers.forEach(([authorId, stats]) => {
       Object.entries(stats.repositories).forEach(([repo, repoStats]) => {

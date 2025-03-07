@@ -29,7 +29,7 @@ const handleApiError = (error: unknown, context: string): never => {
 const silentFetch = async <T>(promise: Promise<T>, context: string): Promise<T | []> => {
   try {
     return await promise;
-  } catch (error) {
+  } catch {
     console.debug(`Error fetching ${context}:`, error);
     return [];
   }
@@ -73,6 +73,7 @@ const fetchAllPages = async <T>(
   } catch (error) {
     handleApiError(error, context);
   }
+  return [];
 };
 
 export const fetchEmployeeNames = async (employeeIds: string[], token?: string): Promise<Record<string, Employee>> => {
@@ -95,6 +96,7 @@ export const fetchEmployeeNames = async (employeeIds: string[], token?: string):
           if (Array.isArray(response)) return null;
           return response;
         } catch (error) {
+          handleApiError(error, `employee ${id}`);
           retries++;
           if (retries < maxRetries) {
             await new Promise(resolve => setTimeout(resolve, retryDelay * retries));
