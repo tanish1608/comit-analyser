@@ -8,6 +8,7 @@ import { DateRangePicker } from 'rsuite';
 import { subDays, startOfDay, endOfDay, formatDistanceToNow } from 'date-fns';
 import 'rsuite/dist/rsuite.min.css';
 
+
 function App() {
   const [org, setOrg] = useState('');
   const [selectedOrg, setSelectedOrg] = useState('');
@@ -19,22 +20,22 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [cacheStatus, setCacheStatus] = useState<CacheStatus | null>(null);
 
-  const predefinedRanges = [
+  const predefinedRanges: RangeType[] = [
     {
       label: 'Last 7 days',
-      value: [subDays(new Date(), 7), new Date()]
+      value: [subDays(new Date(), 7), new Date()] as [Date, Date]
     },
     {
       label: 'Last 14 days',
-      value: [subDays(new Date(), 14), new Date()]
+      value: [subDays(new Date(), 14), new Date()] as [Date, Date]
     },
     {
       label: 'Last 30 days',
-      value: [subDays(new Date(), 30), new Date()]
+      value: [subDays(new Date(), 30), new Date()] as [Date, Date]
     },
     {
       label: 'Last 90 days',
-      value: [subDays(new Date(), 90), new Date()]
+      value: [subDays(new Date(), 90), new Date()] as [Date, Date]
     }
   ];
 
@@ -46,7 +47,6 @@ function App() {
   const {
     data: repos,
     isLoading: isLoadingRepos,
-    error: reposError,
     refetch: refetchRepos
   } = useQuery(
     ['repos', selectedOrg, token],
@@ -70,15 +70,15 @@ function App() {
           source: 'Unknown'
         });
       },
-      onError: (error: any) => {
+      onError: (error: Error) => {
         console.error('Error fetching repos:', error);
         setIsAnalyzing(false);
         
-        if (error.response?.status === 404) {
+        if (error.message.includes('404')) {
           setError(`Organization "${selectedOrg}" not found. Please check the organization name and try again.`);
-        } else if (error.response?.status === 401) {
+        } else if (error.message.includes('401')) {
           setError('Invalid or missing GitHub token. Please check your token and try again.');
-        } else if (error.response?.status === 403) {
+        } else if (error.message.includes('403')) {
           setError('Rate limit exceeded. Please provide a GitHub token or try again later.');
         } else {
           setError('Failed to fetch repositories. Please try again.');
@@ -95,7 +95,7 @@ function App() {
   } = useQuery(
     ['commits', selectedOrg, selectedRepos, dateRange, token],
     async () => {
-      if (!repos?.length) return { commits: [], userStats: {} };
+      if (!repos || repos.length === 0) return { commits: [], userStats: {} };
       
       const filteredRepos = repos.filter(repo => 
         selectedRepos.length === 0 || selectedRepos.includes(repo.name)
@@ -261,6 +261,7 @@ function App() {
   const isLoading = isLoadingRepos || isLoadingCommits || isAnalyzing;
 
   const errorMessage = error || (commitsError ? 'Failed to fetch commit data. Please try again.' : null);
+
 
   return (
     <div className="min-h-screen bg-gray-100 py-8 px-4">

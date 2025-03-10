@@ -29,7 +29,7 @@ const handleApiError = (error: unknown, context: string): never => {
 const silentFetch = async <T>(promise: Promise<T>, context: string): Promise<T | []> => {
   try {
     return await promise;
-  } catch {
+  } catch (error) {
     console.debug(`Error fetching ${context}:`, error);
     return [];
   }
@@ -47,33 +47,28 @@ const fetchAllPages = async <T>(
   let consecutiveEmptyPages = 0;
   const MAX_EMPTY_PAGES = 3;
   
-  try {
-    while (true) {
-      const response = await silentFetch(
-        github.get<T[]>(url, { params: { ...params, page: page.toString() } }),
-        `${context} page ${page}`
-      );
-      
-      const data = Array.isArray(response) ? response : [];
-      
-      if (!data.length) {
-        consecutiveEmptyPages++;
-        if (consecutiveEmptyPages >= MAX_EMPTY_PAGES) break;
-      } else {
-        consecutiveEmptyPages = 0;
-        allData = allData.concat(data);
-      }
-      
-      page++;
-      
-      if (page > 10) break;
+  while (true) {
+    const response = await silentFetch(
+      github.get<T[]>(url, { params: { ...params, page: page.toString() } }),
+      `${context} page ${page}`
+    );
+    
+    const data = Array.isArray(response) ? response : [];
+    
+    if (!data.length) {
+      consecutiveEmptyPages++;
+      if (consecutiveEmptyPages >= MAX_EMPTY_PAGES) break;
+    } else {
+      consecutiveEmptyPages = 0;
+      allData = allData.concat(data);
     }
     
-    return allData;
-  } catch (error) {
-    handleApiError(error, context);
+    page++;
+    
+    if (page > 10) break;
   }
-  return [];
+  
+  return allData;
 };
 
 export const fetchEmployeeNames = async (employeeIds: string[], token?: string): Promise<Record<string, Employee>> => {
@@ -95,8 +90,7 @@ export const fetchEmployeeNames = async (employeeIds: string[], token?: string):
           );
           if (Array.isArray(response)) return null;
           return response;
-        } catch (error) {
-          handleApiError(error, `employee ${id}`);
+        } catch (_error) {
           retries++;
           if (retries < maxRetries) {
             await new Promise(resolve => setTimeout(resolve, retryDelay * retries));
@@ -147,7 +141,7 @@ export const fetchOrgRepos = async (org: string, token?: string): Promise<Reposi
     
     return repos;
   } catch (error) {
-    handleApiError(error, `repositories for ${org}`);
+    return handleApiError(error, `repositories for ${org}`);
   }
 };
 
@@ -175,7 +169,7 @@ export const fetchRepoBranches = async (fullName: string, token?: string): Promi
     
     return branches;
   } catch (error) {
-    handleApiError(error, `branches for ${fullName}`);
+    return handleApiError(error, `branches for ${fullName}`);
   }
 };
 
@@ -223,7 +217,7 @@ export const fetchBranchCommits = async (
     
     return commits;
   } catch (error) {
-    handleApiError(error, `commits for ${fullName}/${branch.name}`);
+    return handleApiError(error, `commits for ${fullName}/${branch.name}`);
   }
 };
 

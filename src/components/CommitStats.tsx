@@ -113,15 +113,8 @@ export const CommitStats: React.FC<CommitStatsProps> = ({ commits, dateRange, us
     
     const summaryWs = utils.json_to_sheet(summaryData);
     utils.book_append_sheet(wb, summaryWs, 'Summary');
-    // const detailedData: any[] = [];
-
-    const detailedData: {
-      'Author ID': string;
-      'Author Name': string;
-      'Repository': string;
-      'Commits': number; // string?
-      'Branches': string;
-    }[] = [];
+    
+    const detailedData: any[] = [];
     
     sortedUsers.forEach(([authorId, stats]) => {
       Object.entries(stats.repositories).forEach(([repo, repoStats]) => {
