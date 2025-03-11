@@ -30,9 +30,14 @@ export interface Commit {
 
 export interface Employee {
   login: string;
-  name: string;
-  avatar_url: string;
-  email?: string;
+  name: string | null;
+  email: string | null;
+  avatar_url?: string;
+  data?: {
+    name: string;
+    email: string;
+    [key: string]: any; // For any additional fields in the response
+  };
 }
 
 export interface UserStats {
@@ -46,7 +51,7 @@ export interface UserStats {
 }
 
 export interface CacheStatus {
-  type: 'repositories' | 'commits' | 'branches';
+  type: 'repositories' | 'commits' | 'branches' | 'employees';
   org: string;
   timestamp: Date;
   count: number;

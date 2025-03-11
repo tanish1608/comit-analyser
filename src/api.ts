@@ -48,24 +48,32 @@ const fetchAllPages = async <T>(
   const MAX_EMPTY_PAGES = 3;
   
   while (true) {
-    const response = await silentFetch(
-      github.get<T[]>(url, { params: { ...params, page: page.toString() } }),
-      `${context} page ${page}`
-    );
-    
-    const data = Array.isArray(response) ? response : [];
-    
-    if (!data.length) {
-      consecutiveEmptyPages++;
-      if (consecutiveEmptyPages >= MAX_EMPTY_PAGES) break;
-    } else {
-      consecutiveEmptyPages = 0;
-      allData = allData.concat(data);
+    try {
+      const response = await silentFetch(
+        github.get<T[]>(url, { params: { ...params, page: page.toString() } }),
+        `${context} page ${page}`
+      );
+      
+      const data = Array.isArray(response) ? response : [];
+      
+      if (!data.length) {
+        consecutiveEmptyPages++;
+        if (consecutiveEmptyPages >= MAX_EMPTY_PAGES) break;
+      } else {
+        consecutiveEmptyPages = 0;
+        allData = allData.concat(data);
+      }
+      
+      page++;
+      
+      if (page > 10) break;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 403) {
+        console.warn('Rate limit reached, stopping pagination');
+        break;
+      }
+      throw error;
     }
-    
-    page++;
-    
-    if (page > 10) break;
   }
   
   return allData;
@@ -78,33 +86,61 @@ export const fetchEmployeeNames = async (employeeIds: string[], token?: string):
   const retryDelay = 1000;
   const maxRetries = 3;
   
+  // Cache key for batch
+  const cacheKey = `employees_${employeeIds.sort().join('_')}_${token ? 'auth' : 'noauth'}`;
+  const cachedEmployees = getFromCache<Record<string, Employee>>('employees', cacheKey);
+  
+  if (cachedEmployees) {
+    console.log('Using cached employee data');
+    return cachedEmployees;
+  }
+  
   for (let i = 0; i < employeeIds.length; i += batchSize) {
     const batch = employeeIds.slice(i, i + batchSize);
     const promises = batch.map(async id => {
       let retries = 0;
       while (retries < maxRetries) {
         try {
-          const response = await silentFetch(
-            github.get<Employee>(`/users/${id}`),
-            `employee ${id}`
-          );
-          if (Array.isArray(response)) return null;
-          return response;
-        } catch (_error) {
+          const response = await github.get<any>(`/users/${id}`);
+          if (response.data) {
+            return {
+              login: id,
+              name: response.data.name || id,
+              email: response.data.email || null,
+              avatar_url: response.data.avatar_url,
+              data: response.data
+            } as Employee;
+          }
+        } catch (error) {
+          if (axios.isAxiosError(error)) {
+            if (error.response?.status === 403) {
+              console.warn(`Rate limit reached for user ${id}, waiting longer...`);
+              await new Promise(resolve => setTimeout(resolve, retryDelay * 5));
+            } else if (error.response?.status === 404) {
+              console.warn(`User ${id} not found`);
+              break;
+            }
+          }
           retries++;
           if (retries < maxRetries) {
             await new Promise(resolve => setTimeout(resolve, retryDelay * retries));
           }
         }
       }
-      return null;
+      // Return a default employee object if all retries fail
+      return {
+        login: id,
+        name: id,
+        email: null,
+        avatar_url: undefined
+      } as Employee;
     });
     
     const results = await Promise.all(promises);
     
-    results.forEach((result) => {
-      if (result && result.data) {
-        employees[result.data.login] = result.data;
+    results.forEach((employee) => {
+      if (employee) {
+        employees[employee.login] = employee;
       }
     });
     
@@ -112,6 +148,11 @@ export const fetchEmployeeNames = async (employeeIds: string[], token?: string):
     if (i + batchSize < employeeIds.length) {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
+  }
+  
+  // Cache the results
+  if (Object.keys(employees).length > 0) {
+    saveToCache('employees', cacheKey, employees);
   }
   
   return employees;

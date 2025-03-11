@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Commit, UserStats, Employee } from '../types';
-import { BarChart2, GitCommit, Users, Calendar, GitBranch, GitFork, FileDown } from 'lucide-react';
+import { BarChart2, GitCommit, Users, Calendar, GitBranch, GitFork, FileDown, Clock } from 'lucide-react';
 import { format, parseISO, differenceInDays, startOfDay, endOfDay } from 'date-fns';
 import { utils, writeFile } from 'xlsx';
 import { fetchEmployeeNames } from '../api';
@@ -104,6 +104,7 @@ export const CommitStats: React.FC<CommitStatsProps> = ({ commits, dateRange, us
     const summaryData = sortedUsers.map(([authorId, stats]) => ({
       'Author ID': authorId,
       'Author Name': employeeNames[authorId]?.name || authorId,
+      'Email': employeeNames[authorId]?.email || 'N/A',
       'Total Commits': stats.totalCommits,
       'Repositories': Object.keys(stats.repositories).length,
       'Active Hours': Object.entries(activeTime)
@@ -121,6 +122,7 @@ export const CommitStats: React.FC<CommitStatsProps> = ({ commits, dateRange, us
         detailedData.push({
           'Author ID': authorId,
           'Author Name': employeeNames[authorId]?.name || authorId,
+          'Email': employeeNames[authorId]?.email || 'N/A',
           'Repository': repo,
           'Commits': repoStats.commits,
           'Branches': repoStats.branches.join(', ')
@@ -135,6 +137,7 @@ export const CommitStats: React.FC<CommitStatsProps> = ({ commits, dateRange, us
       'SHA': commit.sha.substring(0, 7),
       'Author ID': commit.author?.login || commit.commit.author.name,
       'Author Name': employeeNames[commit.author?.login || '']?.name || commit.commit.author.name,
+      'Email': employeeNames[commit.author?.login || '']?.email || commit.commit.author.email || 'N/A',
       'Date': format(new Date(commit.commit.author.date), 'yyyy-MM-dd HH:mm:ss'),
       'Message': commit.commit.message
     }));
@@ -265,7 +268,7 @@ export const CommitStats: React.FC<CommitStatsProps> = ({ commits, dateRange, us
                     {employee?.avatar_url && (
                       <img 
                         src={employee.avatar_url} 
-                        alt={employee.name} 
+                        alt={employee.name || authorId} 
                         className="w-8 h-8 rounded-full"
                       />
                     )}
@@ -273,6 +276,9 @@ export const CommitStats: React.FC<CommitStatsProps> = ({ commits, dateRange, us
                       <h4 className="text-lg font-semibold text-gray-900">
                         {employee?.name || authorId}
                       </h4>
+                      {employee?.email && (
+                        <p className="text-sm text-gray-500">{employee.email}</p>
+                      )}
                       {employee?.name && (
                         <p className="text-sm text-gray-500">{authorId}</p>
                       )}

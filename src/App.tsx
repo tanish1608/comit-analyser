@@ -3,11 +3,10 @@ import { useQuery } from 'react-query';
 import { fetchOrgRepos, fetchAllRepoCommits } from './api';
 import { CommitStats } from './components/CommitStats';
 import { Github, Loader2, Search, Calendar, Key, GitFork, AlertCircle, Database } from 'lucide-react';
-import { UserStats, CacheStatus } from './types';
-import { DateRangePicker } from 'rsuite';
+import { Repository, UserStats, CacheStatus } from './types';
+import { DateRangePicker, RangeType } from 'rsuite';
 import { subDays, startOfDay, endOfDay, formatDistanceToNow } from 'date-fns';
 import 'rsuite/dist/rsuite.min.css';
-
 
 function App() {
   const [org, setOrg] = useState('');
@@ -69,6 +68,10 @@ function App() {
           count: data.length,
           source: 'Unknown'
         });
+        // Trigger commit fetch after repos are loaded
+        if (data.length > 0) {
+          refetchCommits();
+        }
       },
       onError: (error: Error) => {
         console.error('Error fetching repos:', error);
@@ -234,12 +237,6 @@ function App() {
   );
 
   useEffect(() => {
-    if (repos && repos.length > 0) {
-      refetchCommits();
-    }
-  }, [repos, refetchCommits]);
-
-  useEffect(() => {
     if (shouldFetchRepos && selectedOrg) {
       refetchRepos();
       setShouldFetchRepos(false);
@@ -252,16 +249,12 @@ function App() {
 
     setIsAnalyzing(true);
     setSelectedOrg(org);
-    
-    setTimeout(() => {
-      refetchRepos();
-    }, 0);
+    setShouldFetchRepos(true);
   };
 
   const isLoading = isLoadingRepos || isLoadingCommits || isAnalyzing;
 
   const errorMessage = error || (commitsError ? 'Failed to fetch commit data. Please try again.' : null);
-
 
   return (
     <div className="min-h-screen bg-gray-100 py-8 px-4">
