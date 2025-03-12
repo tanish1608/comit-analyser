@@ -2,9 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useQuery } from 'react-query';
 import { fetchOrgRepos, fetchAllRepoCommits } from './api';
 import { CommitStats } from './components/CommitStats';
-import { Github, Loader2, Search, Calendar, Key, GitFork, AlertCircle, Database } from 'lucide-react';
+import { Github, Loader2, Search, Calendar, Key, GitFork, AlertCircle } from 'lucide-react';
 import { Repository, UserStats, CacheStatus } from './types';
-import { DateRangePicker, RangeType } from 'rsuite';
+import { DateRangePicker } from 'rsuite';
 import { subDays, startOfDay, endOfDay, formatDistanceToNow } from 'date-fns';
 import 'rsuite/dist/rsuite.min.css';
 
@@ -18,25 +18,6 @@ function App() {
   const [shouldFetchRepos, setShouldFetchRepos] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [cacheStatus, setCacheStatus] = useState<CacheStatus | null>(null);
-
-  const predefinedRanges: RangeType[] = [
-    {
-      label: 'Last 7 days',
-      value: [subDays(new Date(), 7), new Date()] as [Date, Date]
-    },
-    {
-      label: 'Last 14 days',
-      value: [subDays(new Date(), 14), new Date()] as [Date, Date]
-    },
-    {
-      label: 'Last 30 days',
-      value: [subDays(new Date(), 30), new Date()] as [Date, Date]
-    },
-    {
-      label: 'Last 90 days',
-      value: [subDays(new Date(), 90), new Date()] as [Date, Date]
-    }
-  ];
 
   const selectedRepos = repoInput
     .split(',')
@@ -277,16 +258,13 @@ function App() {
 
         {cacheStatus && (
           <div className="bg-blue-50 border border-blue-200 text-blue-700 p-4 rounded-lg mb-6">
-            <div className="flex items-center gap-2">
-              <Database className="w-5 h-5" />
-              <p>
-                <span className="font-semibold">{cacheStatus.type === 'repositories' ? 'Repositories' : 'Commits'} data for {cacheStatus.org}:</span> {' '}
-                {cacheStatus.count} items {cacheStatus.source !== 'Unknown' && `(${cacheStatus.source})`} • 
-                <span className="ml-1 text-blue-600">
-                  Last updated {formatDistanceToNow(cacheStatus.timestamp)} ago
-                </span>
-              </p>
-            </div>
+            <p>
+              <span className="font-semibold">{cacheStatus.type === 'repositories' ? 'Repositories' : 'Commits'} data for {cacheStatus.org}:</span> {' '}
+              {cacheStatus.count} items {cacheStatus.source !== 'Unknown' && `(${cacheStatus.source})`} • 
+              <span className="ml-1 text-blue-600">
+                Last updated {formatDistanceToNow(cacheStatus.timestamp)} ago
+              </span>
+            </p>
           </div>
         )}
 
@@ -345,8 +323,6 @@ function App() {
                 value={dateRange}
                 onChange={value => setDateRange(value as [Date, Date])}
                 className="w-full"
-                ranges={predefinedRanges}
-                placeholder="Select date range"
                 character=" - "
                 style={{ width: '100%' }}
                 cleanable={false}

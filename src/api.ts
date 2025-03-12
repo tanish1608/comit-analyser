@@ -1,16 +1,24 @@
 import axios, { AxiosError } from 'axios';
 import { Repository, Commit, Branch, Employee } from './types';
-import { getFromCache, saveToCache } from './cache';
 
-const createGithubClient = (token?: string) => axios.create({
+const API_URL = 'http://localhost:3001/api';
+const github = axios.create({
   baseURL: 'https://api.github.com',
   params: {
     per_page: '100',
   },
-  headers: token ? {
-    Authorization: `Bearer ${token}`,
-  } : {},
 });
+
+// Check if cache server is running
+const checkCacheServer = async () => {
+  try {
+    await axios.get(`${API_URL}/health`);
+    return true;
+  } catch (error) {
+    console.warn('Cache server not available');
+    return false;
+  }
+};
 
 const handleApiError = (error: unknown, context: string): never => {
   if (axios.isAxiosError(error)) {
@@ -26,35 +34,27 @@ const handleApiError = (error: unknown, context: string): never => {
   throw new Error(`Failed to fetch ${context}`);
 };
 
-const silentFetch = async <T>(promise: Promise<T>, context: string): Promise<T | []> => {
-  try {
-    return await promise;
-  } catch (error) {
-    console.debug(`Error fetching ${context}:`, error);
-    return [];
-  }
-};
-
 const fetchAllPages = async <T>(
   url: string,
   token?: string,
   params: Record<string, string> = {},
   context: string = 'data'
 ): Promise<T[]> => {
-  const github = createGithubClient(token);
   let page = 1;
   let allData: T[] = [];
   let consecutiveEmptyPages = 0;
   const MAX_EMPTY_PAGES = 3;
   
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  
   while (true) {
     try {
-      const response = await silentFetch(
-        github.get<T[]>(url, { params: { ...params, page: page.toString() } }),
-        `${context} page ${page}`
-      );
+      const response = await github.get<T[]>(url, {
+        params: { ...params, page: page.toString() },
+        headers
+      });
       
-      const data = Array.isArray(response) ? response : [];
+      const data = response.data;
       
       if (!data.length) {
         consecutiveEmptyPages++;
@@ -80,20 +80,11 @@ const fetchAllPages = async <T>(
 };
 
 export const fetchEmployeeNames = async (employeeIds: string[], token?: string): Promise<Record<string, Employee>> => {
-  const github = createGithubClient(token);
   const employees: Record<string, Employee> = {};
   const batchSize = 10;
   const retryDelay = 1000;
   const maxRetries = 3;
-  
-  // Cache key for batch
-  const cacheKey = `employees_${employeeIds.sort().join('_')}_${token ? 'auth' : 'noauth'}`;
-  const cachedEmployees = getFromCache<Record<string, Employee>>('employees', cacheKey);
-  
-  if (cachedEmployees) {
-    console.log('Using cached employee data');
-    return cachedEmployees;
-  }
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
   
   for (let i = 0; i < employeeIds.length; i += batchSize) {
     const batch = employeeIds.slice(i, i + batchSize);
@@ -101,7 +92,7 @@ export const fetchEmployeeNames = async (employeeIds: string[], token?: string):
       let retries = 0;
       while (retries < maxRetries) {
         try {
-          const response = await github.get<any>(`/users/${id}`);
+          const response = await github.get(`/users/${id}`, { headers });
           if (response.data) {
             return {
               login: id,
@@ -127,7 +118,6 @@ export const fetchEmployeeNames = async (employeeIds: string[], token?: string):
           }
         }
       }
-      // Return a default employee object if all retries fail
       return {
         login: id,
         name: id,
@@ -137,37 +127,35 @@ export const fetchEmployeeNames = async (employeeIds: string[], token?: string):
     });
     
     const results = await Promise.all(promises);
-    
     results.forEach((employee) => {
       if (employee) {
         employees[employee.login] = employee;
       }
     });
     
-    // Add small delay between batches to avoid rate limiting
     if (i + batchSize < employeeIds.length) {
       await new Promise(resolve => setTimeout(resolve, 1000));
     }
-  }
-  
-  // Cache the results
-  if (Object.keys(employees).length > 0) {
-    saveToCache('employees', cacheKey, employees);
   }
   
   return employees;
 };
 
 export const fetchOrgRepos = async (org: string, token?: string): Promise<Repository[]> => {
-  const cacheKey = `org_${org}_${token ? 'auth' : 'noauth'}`;
-  
-  const cachedRepos = getFromCache<Repository[]>('repositories', cacheKey);
-  if (cachedRepos) {
-    console.log(`Using cached repositories for ${org}`);
-    return cachedRepos;
+  const isCacheAvailable = await checkCacheServer();
+
+  if (isCacheAvailable) {
+    try {
+      const cacheResponse = await axios.get(`${API_URL}/cache/repositories/${org}`);
+      if (cacheResponse.data && cacheResponse.data.length > 0) {
+        console.log('Using cached repositories');
+        return cacheResponse.data;
+      }
+    } catch (error) {
+      console.log('Cache miss for repositories');
+    }
   }
-  
-  console.log(`Fetching repositories for ${org} from GitHub API`);
+
   try {
     const repos = await fetchAllPages<Repository>(
       `/orgs/${org}/repos`,
@@ -176,8 +164,12 @@ export const fetchOrgRepos = async (org: string, token?: string): Promise<Reposi
       `repositories for ${org}`
     );
     
-    if (repos.length > 0) {
-      saveToCache('repositories', cacheKey, repos);
+    if (repos.length > 0 && isCacheAvailable) {
+      try {
+        await axios.post(`${API_URL}/cache/repositories/${org}`, { data: repos });
+      } catch (error) {
+        console.warn('Failed to cache repositories:', error);
+      }
     }
     
     return repos;
@@ -187,15 +179,20 @@ export const fetchOrgRepos = async (org: string, token?: string): Promise<Reposi
 };
 
 export const fetchRepoBranches = async (fullName: string, token?: string): Promise<Branch[]> => {
-  const cacheKey = `branches_${fullName}_${token ? 'auth' : 'noauth'}`;
-  
-  const cachedBranches = getFromCache<Branch[]>('branches', cacheKey);
-  if (cachedBranches) {
-    console.log(`Using cached branches for ${fullName}`);
-    return cachedBranches;
+  const isCacheAvailable = await checkCacheServer();
+
+  if (isCacheAvailable) {
+    try {
+      const cacheResponse = await axios.get(`${API_URL}/cache/branches/${fullName}`);
+      if (cacheResponse.data && cacheResponse.data.length > 0) {
+        console.log('Using cached branches');
+        return cacheResponse.data;
+      }
+    } catch (error) {
+      console.log('Cache miss for branches');
+    }
   }
-  
-  console.log(`Fetching branches for ${fullName} from GitHub API`);
+
   try {
     const branches = await fetchAllPages<Branch>(
       `/repos/${fullName}/branches`,
@@ -204,8 +201,12 @@ export const fetchRepoBranches = async (fullName: string, token?: string): Promi
       `branches for ${fullName}`
     );
     
-    if (branches.length > 0) {
-      saveToCache('branches', cacheKey, branches);
+    if (branches.length > 0 && isCacheAvailable) {
+      try {
+        await axios.post(`${API_URL}/cache/branches/${fullName}`, { data: branches });
+      } catch (error) {
+        console.warn('Failed to cache branches:', error);
+      }
     }
     
     return branches;
@@ -232,18 +233,22 @@ export const fetchBranchCommits = async (
   if (until) {
     params.until = until.toISOString();
   }
+
+  const cacheKey = `${fullName}/${branch.name}/${since?.toISOString() || 'none'}/${until?.toISOString() || 'none'}`;
+  const isCacheAvailable = await checkCacheServer();
   
-  const sinceStr = since ? since.toISOString() : 'none';
-  const untilStr = until ? until.toISOString() : 'none';
-  const cacheKey = `commits_${fullName}_${branch.name}_${sinceStr}_${untilStr}_${token ? 'auth' : 'noauth'}`;
-  
-  const cachedCommits = getFromCache<Commit[]>('commits', cacheKey);
-  if (cachedCommits) {
-    console.log(`Using cached commits for ${fullName}/${branch.name}`);
-    return cachedCommits;
+  if (isCacheAvailable) {
+    try {
+      const cacheResponse = await axios.get(`${API_URL}/cache/commits/${encodeURIComponent(cacheKey)}`);
+      if (cacheResponse.data && cacheResponse.data.length > 0) {
+        console.log('Using cached commits');
+        return cacheResponse.data;
+      }
+    } catch (error) {
+      console.log('Cache miss for commits');
+    }
   }
-  
-  console.log(`Fetching commits for ${fullName}/${branch.name} from GitHub API`);
+
   try {
     const commits = await fetchAllPages<Commit>(
       `/repos/${fullName}/commits`,
@@ -252,8 +257,12 @@ export const fetchBranchCommits = async (
       `commits for ${fullName}/${branch.name}`
     );
     
-    if (commits.length > 0) {
-      saveToCache('commits', cacheKey, commits);
+    if (commits.length > 0 && isCacheAvailable) {
+      try {
+        await axios.post(`${API_URL}/cache/commits/${encodeURIComponent(cacheKey)}`, { data: commits });
+      } catch (error) {
+        console.warn('Failed to cache commits:', error);
+      }
     }
     
     return commits;

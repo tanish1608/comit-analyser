@@ -4,101 +4,129 @@ import cors from 'cors';
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Cache storage
-let serverCache = {
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+  expiresAt: number;
+}
+
+interface Cache {
+  repositories: { [key: string]: CacheEntry<any> };
+  branches: { [key: string]: CacheEntry<any> };
+  commits: { [key: string]: CacheEntry<any> };
+}
+
+const CACHE_TTL = 1000 * 60 * 60; // 1 hour
+const cache: Cache = {
   repositories: {},
   branches: {},
   commits: {},
-  timestamp: Date.now(),
 };
 
-// Middleware
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-// Get cache data
-app.get('/api/cache/data', (req, res) => {
-  res.json(serverCache);
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
+// Generic cache get endpoint
+app.get('/api/cache/:type/:key', (req, res) => {
+  const { type, key } = req.params;
+  console.log(`Cache GET request for ${type}/${key}`);
+  
+  if (!cache[type as keyof Cache]) {
+    console.log(`Invalid cache type: ${type}`);
+    return res.status(404).json({ error: 'Invalid cache type' });
+  }
+  
+  const entry = cache[type as keyof Cache][decodeURIComponent(key)];
+  
+  if (!entry || Date.now() > entry.expiresAt) {
+    if (entry) {
+      delete cache[type as keyof Cache][decodeURIComponent(key)];
+      console.log(`Cache entry expired for ${type}/${key}`);
+    } else {
+      console.log(`Cache miss for ${type}/${key}`);
+    }
+    return res.status(404).json({ error: 'Cache miss' });
+  }
+  
+  console.log(`Cache hit for ${type}/${key}`);
+  res.json(entry.data);
+});
+
+// Generic cache set endpoint
+app.post('/api/cache/:type/:key', (req, res) => {
+  const { type, key } = req.params;
+  const { data } = req.body;
+  console.log(`Cache POST request for ${type}/${key}`);
+  
+  if (!cache[type as keyof Cache]) {
+    console.log(`Invalid cache type: ${type}`);
+    return res.status(400).json({ error: 'Invalid cache type' });
+  }
+  
+  cache[type as keyof Cache][decodeURIComponent(key)] = {
+    data,
+    timestamp: Date.now(),
+    expiresAt: Date.now() + CACHE_TTL,
+  };
+  
+  console.log(`Cache entry created for ${type}/${key}`);
+  res.json({ success: true });
 });
 
 // Get cache statistics
 app.get('/api/cache/stats', (req, res) => {
   const stats = {
     repositories: {
-      count: Object.keys(serverCache.repositories).length,
-      size: JSON.stringify(serverCache.repositories).length,
+      count: Object.keys(cache.repositories).length,
+      size: JSON.stringify(cache.repositories).length,
     },
     branches: {
-      count: Object.keys(serverCache.branches).length,
-      size: JSON.stringify(serverCache.branches).length,
+      count: Object.keys(cache.branches).length,
+      size: JSON.stringify(cache.branches).length,
     },
     commits: {
-      count: Object.keys(serverCache.commits).length,
-      size: JSON.stringify(serverCache.commits).length,
+      count: Object.keys(cache.commits).length,
+      size: JSON.stringify(cache.commits).length,
     },
-    totalSize: JSON.stringify(serverCache).length,
-    lastUpdated: serverCache.timestamp,
+    totalSize: JSON.stringify(cache).length,
   };
   
   res.json(stats);
 });
 
-// Update cache
-app.post('/api/cache/update', (req, res) => {
-  try {
-    const newCache = req.body;
-    
-    // Only update if the new cache is newer
-    if (newCache.timestamp > serverCache.timestamp) {
-      serverCache = newCache;
-      res.json({ success: true, message: 'Cache updated successfully' });
-    } else {
-      res.json({ success: false, message: 'Cache is not newer than server cache' });
-    }
-  } catch (error) {
-    console.error('Error updating cache:', error);
-    res.status(500).json({ error: 'Failed to update cache' });
-  }
-});
-
 // Clear expired cache entries
 app.post('/api/cache/clear-expired', (req, res) => {
-  try {
-    Object.keys(serverCache).forEach((type) => {
-      if (type === 'timestamp') return;
-      
-      Object.keys(serverCache[type]).forEach((key) => {
-        const entry = serverCache[type][key];
-        if (Date.now() > entry.expiresAt) {
-          delete serverCache[type][key];
-        }
-      });
+  const now = Date.now();
+  let cleared = 0;
+  
+  Object.keys(cache).forEach((type) => {
+    Object.keys(cache[type as keyof Cache]).forEach((key) => {
+      if (now > cache[type as keyof Cache][key].expiresAt) {
+        delete cache[type as keyof Cache][key];
+        cleared++;
+      }
     });
-    
-    serverCache.timestamp = Date.now();
-    res.json({ success: true, message: 'Expired cache entries cleared' });
-  } catch (error) {
-    console.error('Error clearing expired cache:', error);
-    res.status(500).json({ error: 'Failed to clear expired cache entries' });
-  }
+  });
+  
+  console.log(`Cleared ${cleared} expired cache entries`);
+  res.json({ success: true, cleared });
 });
 
 // Clear all cache
-app.post('/api/cache/clear-all', (req, res) => {
-  try {
-    serverCache = {
-      repositories: {},
-      branches: {},
-      commits: {},
-      timestamp: Date.now(),
-    };
-    res.json({ success: true, message: 'Cache cleared successfully' });
-  } catch (error) {
-    console.error('Error clearing cache:', error);
-    res.status(500).json({ error: 'Failed to clear cache' });
-  }
+app.post('/api/cache/clear', (req, res) => {
+  Object.keys(cache).forEach((type) => {
+    cache[type as keyof Cache] = {};
+  });
+  
+  console.log('Cache cleared');
+  res.json({ success: true });
 });
 
 app.listen(PORT, () => {
-  console.log(`Cache management server running on port ${PORT}`);
+  console.log(`Cache server running on port ${PORT}`);
 });

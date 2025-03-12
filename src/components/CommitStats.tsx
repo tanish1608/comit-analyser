@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { Commit, UserStats, Employee } from '../types';
-import { BarChart2, GitCommit, Users, Calendar, GitBranch, GitFork, FileDown, Clock } from 'lucide-react';
+import { BarChart2, GitCommit, Users, Calendar, GitBranch, GitFork, FileDown } from 'lucide-react';
 import { format, parseISO, differenceInDays, startOfDay, endOfDay } from 'date-fns';
 import { utils, writeFile } from 'xlsx';
 import { fetchEmployeeNames } from '../api';
@@ -42,29 +42,17 @@ interface CommitTrend {
 
 export const CommitStats: React.FC<CommitStatsProps> = ({ commits, dateRange, userStats, token }) => {
   const [employeeNames, setEmployeeNames] = useState<Record<string, Employee>>({});
-  const [commitTrends, setCommitTrends] = useState<CommitTrend[]>([]);
-  const [activeTime, setActiveTime] = useState<Record<string, number>>({});
-  
-  useEffect(() => {
-    const fetchNames = async () => {
-      const employeeIds = Object.keys(userStats);
-      const names = await fetchEmployeeNames(employeeIds, token);
-      setEmployeeNames(names);
-    };
-    
-    fetchNames();
-  }, [userStats, token]);
 
-  // Filter out pull request commits
-  const nonPRCommits = commits.filter(commit => 
-    !commit.commit.message.toLowerCase().includes('merge pull request') &&
-    !commit.commit.message.toLowerCase().includes('pr #')
-  );
-
-  // Calculate commit trends
-  useEffect(() => {
+  // Calculate commit trends and active times using useMemo
+  const { commitTrends, activeTime } = useMemo(() => {
     const trends: Record<string, number> = {};
     const times: Record<string, number[]> = {};
+    
+    // Filter out pull request commits
+    const nonPRCommits = commits.filter(commit => 
+      !commit.commit.message.toLowerCase().includes('merge pull request') &&
+      !commit.commit.message.toLowerCase().includes('pr #')
+    );
     
     nonPRCommits.forEach(commit => {
       const date = format(parseISO(commit.commit.author.date), 'yyyy-MM-dd');
@@ -81,22 +69,46 @@ export const CommitStats: React.FC<CommitStatsProps> = ({ commits, dateRange, us
       .map(([date, count]) => ({ date, count }))
       .sort((a, b) => a.date.localeCompare(b.date));
     
-    setCommitTrends(trendArray);
-    
     // Calculate average commits per hour
     const avgTimes: Record<string, number> = {};
     Object.entries(times).forEach(([hour, counts]) => {
       avgTimes[hour] = counts.reduce((a, b) => a + b, 0) / counts.length;
     });
-    setActiveTime(avgTimes);
-  }, [nonPRCommits]);
+    
+    return {
+      commitTrends: trendArray,
+      activeTime: avgTimes
+    };
+  }, [commits]);
+
+  useEffect(() => {
+    const fetchNames = async () => {
+      const employeeIds = Object.keys(userStats);
+      const names = await fetchEmployeeNames(employeeIds, token);
+      setEmployeeNames(names);
+    };
+    
+    fetchNames();
+  }, [userStats, token]);
+
+  // Filter out pull request commits
+  const nonPRCommits = useMemo(() => 
+    commits.filter(commit => 
+      !commit.commit.message.toLowerCase().includes('merge pull request') &&
+      !commit.commit.message.toLowerCase().includes('pr #')
+    ),
+    [commits]
+  );
 
   const dateRangeText = dateRange
     ? `${format(dateRange[0], 'MMM dd, yyyy')} - ${format(dateRange[1], 'MMM dd, yyyy')}`
     : 'All time';
 
-  const sortedUsers = Object.entries(userStats)
-    .sort(([, a], [, b]) => b.totalCommits - a.totalCommits);
+  const sortedUsers = useMemo(() => 
+    Object.entries(userStats)
+      .sort(([, a], [, b]) => b.totalCommits - a.totalCommits),
+    [userStats]
+  );
 
   const handleExportToExcel = () => {
     const wb = utils.book_new();
