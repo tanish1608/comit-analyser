@@ -2,23 +2,58 @@ import React, { useState, useEffect } from 'react';
 import { useQuery } from 'react-query';
 import { fetchOrgRepos, fetchAllRepoCommits, fetchEmployeeNames } from './api';
 import { Dashboard } from './pages/Dashboard';
-import { Github, Loader2, Search, Calendar, Key, GitFork, AlertCircle } from 'lucide-react';
+import { PodComparison } from './pages/PodComparison';
+import { Github, Loader2, Search, Calendar, Key, GitFork, AlertCircle, Users } from 'lucide-react';
 import { Repository, UserStats, CacheStatus, Employee } from './types';
 import { DateRangePicker } from 'rsuite';
 import { subDays, startOfDay, endOfDay } from 'date-fns';
+import qs from 'qs';
 import 'rsuite/dist/rsuite.min.css';
 
 function App() {
-  const [org, setOrg] = useState('');
-  const [selectedOrg, setSelectedOrg] = useState('');
-  const [token, setToken] = useState('');
-  const [dateRange, setDateRange] = useState<[Date, Date]>([subDays(new Date(), 30), new Date()]);
+  // Parse URL parameters
+  const getInitialState = () => {
+    const params = qs.parse(window.location.search, { ignoreQueryPrefix: true });
+    return {
+      org: params.org as string || '',
+      selectedOrg: params.org as string || '',
+      token: params.token as string || '',
+      repoInput: params.repos as string || '',
+      dateRange: params.startDate && params.endDate
+        ? [new Date(params.startDate as string), new Date(params.endDate as string)]
+        : [subDays(new Date(), 30), new Date()],
+      showPodComparison: params.view === 'pods'
+    };
+  };
+
+  const initialState = getInitialState();
+  const [org, setOrg] = useState(initialState.org);
+  const [selectedOrg, setSelectedOrg] = useState(initialState.selectedOrg);
+  const [token, setToken] = useState(initialState.token);
+  const [dateRange, setDateRange] = useState<[Date, Date]>(initialState.dateRange);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [repoInput, setRepoInput] = useState('');
-  const [shouldFetchRepos, setShouldFetchRepos] = useState(false);
+  const [repoInput, setRepoInput] = useState(initialState.repoInput);
+  const [shouldFetchRepos, setShouldFetchRepos] = useState(!!initialState.selectedOrg);
   const [error, setError] = useState<string | null>(null);
   const [cacheStatus, setCacheStatus] = useState<CacheStatus | null>(null);
   const [employeeNames, setEmployeeNames] = useState<Record<string, Employee>>({});
+  const [showPodComparison, setShowPodComparison] = useState(initialState.showPodComparison);
+
+  // Update URL when state changes
+  useEffect(() => {
+    const params = {
+      org: selectedOrg || undefined,
+      token: token || undefined,
+      repos: repoInput || undefined,
+      startDate: dateRange[0].toISOString(),
+      endDate: dateRange[1].toISOString(),
+      view: showPodComparison ? 'pods' : undefined
+    };
+
+    const queryString = qs.stringify(params, { skipNulls: true });
+    const newUrl = `${window.location.pathname}${queryString ? `?${queryString}` : ''}`;
+    window.history.replaceState({}, '', newUrl);
+  }, [selectedOrg, token, repoInput, dateRange, showPodComparison]);
 
   const selectedRepos = repoInput
     .split(',')
@@ -198,7 +233,7 @@ function App() {
       
       // Fetch employee names
       const employeeIds = Object.keys(userStats);
-      const names = await fetchEmployeeNames(employeeIds, token);
+      const names = await fetchEmployeeNames(employeeIds);
       setEmployeeNames(names);
       
       setCacheStatus(prev => prev ? {
@@ -250,11 +285,22 @@ function App() {
   return (
     <div className="min-h-screen bg-gray-100 py-8 px-4">
       <div className="max-w-7xl mx-auto">
-        <div className="flex items-center gap-3 mb-8">
-          <Github className="w-10 h-10 text-indigo-600" />
-          <h1 className="text-3xl font-bold text-gray-900">
-            GitHub Organization Commit Analyzer
-          </h1>
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center gap-3">
+            <Github className="w-10 h-10 text-indigo-600 animate-pulse" />
+            <h1 className="text-3xl font-bold text-gray-900">
+              GitHub Organization Commit Analyzer
+            </h1>
+          </div>
+          {repoData?.commits && repoData.commits.length > 0 && (
+            <button
+              onClick={() => setShowPodComparison(!showPodComparison)}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors duration-200"
+            >
+              <Users className="w-5 h-5" />
+              {showPodComparison ? 'Show Dashboard' : 'Compare Pod Employees'}
+            </button>
+          )}
         </div>
 
         {errorMessage && (
@@ -384,18 +430,34 @@ function App() {
 
         {isLoading && (
           <div className="loading">
-            <Loader2 className="w-8 h-8 animate-spin" />
-            <span>Fetching commit data from all branches...</span>
+            <div className="flex flex-col items-center gap-4">
+              <div className="relative">
+                <div className="w-16 h-16 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+                  <Github className="w-8 h-8 text-indigo-600" />
+                </div>
+              </div>
+              <p className="text-lg font-medium text-gray-700">
+                Fetching commit data from all branches...
+              </p>
+              <div className="w-48 h-2 bg-gray-200 rounded-full overflow-hidden">
+                <div className="h-full bg-indigo-600 animate-pulse"></div>
+              </div>
+            </div>
           </div>
         )}
 
         {repoData?.commits && repoData.commits.length > 0 && (
-          <Dashboard
-            commits={repoData.commits}
-            dateRange={dateRange}
-            userStats={repoData.userStats}
-            employeeNames={employeeNames}
-          />
+          showPodComparison ? (
+            <PodComparison userStats={repoData.userStats} />
+          ) : (
+            <Dashboard
+              commits={repoData.commits}
+              dateRange={dateRange}
+              userStats={repoData.userStats}
+              employeeNames={employeeNames}
+            />
+          )
         )}
 
         {selectedOrg && !isLoading && (!repoData?.commits || repoData.commits.length === 0) && (

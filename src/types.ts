@@ -1,3 +1,5 @@
+import { Repository, Commit, Branch, Employee } from './types';
+
 export interface Repository {
   id: number;
   name: string;
@@ -36,7 +38,7 @@ export interface Employee {
   data?: {
     name: string;
     email: string;
-    [key: string]: any; // For any additional fields in the response
+    [key: string]: any;
   };
 }
 
@@ -56,4 +58,16 @@ export interface CacheStatus {
   timestamp: Date;
   count: number;
   source: 'Cache' | 'API' | 'Unknown' | 'Fetching...' | 'Complete';
+}
+
+export interface PodEmployee {
+  empiId: string;
+  name: string;
+  pod: string;
+  hasCommits: boolean;
+}
+
+export interface Pod {
+  name: string;
+  apiUrl: string;
 }

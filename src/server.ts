@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import axios from 'axios';
 
 const app = express();
 const PORT = 3001;
@@ -14,6 +15,7 @@ interface Cache {
   repositories: { [key: string]: CacheEntry<any> };
   branches: { [key: string]: CacheEntry<any> };
   commits: { [key: string]: CacheEntry<any> };
+  employees: { [key: string]: CacheEntry<any> };
 }
 
 const CACHE_TTL = 1000 * 60 * 60; // 1 hour
@@ -21,6 +23,7 @@ const cache: Cache = {
   repositories: {},
   branches: {},
   commits: {},
+  employees: {}
 };
 
 // Configure CORS before other middleware
@@ -42,6 +45,78 @@ app.use((req, res, next) => {
 app.get('/api/health', (req, res) => {
   console.log('Health check request received');
   res.json({ status: 'ok' });
+});
+
+// Employee name fetching endpoint
+app.get('/api/employees/:empiId', async (req, res) => {
+  const { empiId } = req.params;
+  
+  try {
+    // Check cache first
+    const cacheKey = `employee_${empiId}`;
+    const cachedData = cache.employees[cacheKey];
+    
+    if (cachedData && Date.now() < cachedData.expiresAt) {
+      console.log(`Cache hit for employee ${empiId}`);
+      return res.json(cachedData.data);
+    }
+    
+    // Fetch from employee API
+    const response = await axios.get(`https://api.example.com/employees/${empiId}`);
+    const employeeData = {
+      name: response.data.name,
+      email: response.data.email,
+      department: response.data.department
+    };
+    
+    // Cache the result
+    cache.employees[cacheKey] = {
+      data: employeeData,
+      timestamp: Date.now(),
+      expiresAt: Date.now() + CACHE_TTL
+    };
+    
+    res.json(employeeData);
+  } catch (error) {
+    console.error(`Error fetching employee ${empiId}:`, error);
+    res.status(500).json({ error: 'Failed to fetch employee data' });
+  }
+});
+
+// Pod employees fetching endpoint
+app.get('/api/pods/:podId/employees', async (req, res) => {
+  const { podId } = req.params;
+  
+  try {
+    // Check cache first
+    const cacheKey = `pod_${podId}`;
+    const cachedData = cache.employees[cacheKey];
+    
+    if (cachedData && Date.now() < cachedData.expiresAt) {
+      console.log(`Cache hit for pod ${podId}`);
+      return res.json(cachedData.data);
+    }
+    
+    // Fetch from pod API
+    const response = await axios.get(`https://api.example.com/pods/${podId}/employees`);
+    const employees = response.data.map((emp: any) => ({
+      empiId: emp.empiId,
+      name: emp.name,
+      pod: podId
+    }));
+    
+    // Cache the result
+    cache.employees[cacheKey] = {
+      data: employees,
+      timestamp: Date.now(),
+      expiresAt: Date.now() + CACHE_TTL
+    };
+    
+    res.json(employees);
+  } catch (error) {
+    console.error(`Error fetching employees for pod ${podId}:`, error);
+    res.status(500).json({ error: 'Failed to fetch pod employees' });
+  }
 });
 
 // Generic cache get endpoint
@@ -115,6 +190,10 @@ app.get('/api/cache/stats', (req, res) => {
     commits: {
       count: Object.keys(cache.commits).length,
       size: JSON.stringify(cache.commits).length,
+    },
+    employees: {
+      count: Object.keys(cache.employees).length,
+      size: JSON.stringify(cache.employees).length,
     },
     totalSize: JSON.stringify(cache).length,
   };

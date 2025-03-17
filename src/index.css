@@ -20,7 +20,7 @@
 }
 
 .stat-card {
-  @apply bg-gray-50 rounded-lg p-6 border border-gray-200;
+  @apply bg-gray-50 rounded-lg p-6 border border-gray-200 hover:border-indigo-300 transition-colors duration-200;
 }
 
 .stat-card-header {
@@ -44,7 +44,7 @@
 }
 
 .author-card {
-  @apply bg-gray-50 rounded-lg p-4 mb-4 border border-gray-200;
+  @apply bg-gray-50 rounded-lg p-4 mb-4 border border-gray-200 hover:border-indigo-300 transition-colors duration-200;
 }
 
 .author-info {
@@ -81,7 +81,11 @@
 }
 
 .input-field {
-  @apply w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-transparent;
+  @apply w-full px-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all duration-200;
+}
+
+.input-field:hover {
+  @apply border-indigo-300;
 }
 
 .select-field {
@@ -89,7 +93,7 @@
 }
 
 .submit-button {
-  @apply flex items-center justify-center px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+  @apply flex items-center justify-center px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed transform hover:scale-105 active:scale-95;
 }
 
 /* Loading state */
@@ -98,20 +102,38 @@
 }
 
 .loading svg {
-  @apply animate-spin mr-3 text-indigo-600;
+  @apply text-indigo-600;
 }
 
 /* Error message */
 .error {
-  @apply bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg mb-6;
+  @apply bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg mb-6 animate-fade-in;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease-out;
 }
 
 /* RSuite DateRangePicker customization */
 .rs-picker-toggle {
-  @apply w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 bg-white !important;
+  @apply w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 bg-white transition-all duration-200 !important;
 }
 
-.rs-picker-toggle:hover,
+.rs-picker-toggle:hover {
+  @apply border-indigo-300 !important;
+}
+
 .rs-picker-toggle:focus {
   @apply border-indigo-500 !important;
 }
@@ -125,7 +147,7 @@
 }
 
 .rs-picker-toolbar-right-btn-ok {
-  @apply bg-indigo-600 text-white hover:bg-indigo-700 !important;
+  @apply bg-indigo-600 text-white hover:bg-indigo-700 transition-colors duration-200 !important;
 }
 
 .rs-picker-menu {
@@ -146,5 +168,43 @@ canvas {
 }
 
 .chart-container {
-  @apply bg-white p-6 rounded-lg shadow;
+  @apply bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-shadow duration-200;
+}
+
+/* Animations */
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+/* Hover effects */
+.hover-scale {
+  @apply transform transition-transform duration-200 hover:scale-105;
+}
+
+.hover-shadow {
+  @apply transition-shadow duration-200 hover:shadow-lg;
+}
+
+/* Transitions */
+.custom-transition {
+  @apply transition-all duration-200;
 }

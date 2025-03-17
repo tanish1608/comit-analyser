@@ -1,5 +1,5 @@
 import axios, { AxiosError } from 'axios';
-import { Repository, Commit, Branch, Employee } from './types';
+import { Repository, Commit, Branch, Employee, PodEmployee } from './types';
 
 const API_URL = 'http://localhost:3001/api';
 const github = axios.create({
@@ -29,16 +29,26 @@ const handleApiError = (error: unknown, context: string): never => {
   console.error(`API Error in ${context}:`, error);
   if (axios.isAxiosError(error)) {
     const axiosError = error as AxiosError;
-    if (axiosError.response?.status === 404) {
+    const status = axiosError.response?.status;
+    const rateLimitRemaining = axiosError.response?.headers?.['x-ratelimit-remaining'];
+    const rateLimitReset = axiosError.response?.headers?.['x-ratelimit-reset'];
+
+    if (status === 403 && rateLimitRemaining === '0') {
+      const resetDate = rateLimitReset ? new Date(parseInt(rateLimitReset) * 1000) : new Date();
+      const waitTime = Math.ceil((resetDate.getTime() - Date.now()) / 1000 / 60);
+      throw new Error(
+        `GitHub API rate limit exceeded. Please try again in ${waitTime} minutes or use a GitHub token.`
+      );
+    } else if (status === 404) {
       throw new Error(`${context} not found`);
-    } else if (axiosError.response?.status === 403) {
-      throw new Error(`Rate limit exceeded for ${context}. Please try again later or use a GitHub token`);
-    } else if (axiosError.response?.status === 401) {
+    } else if (status === 401) {
       throw new Error(`Invalid GitHub token for ${context}`);
     }
   }
   throw new Error(`Failed to fetch ${context}`);
 };
+
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const fetchAllPages = async <T>(
   url: string,
@@ -49,6 +59,9 @@ const fetchAllPages = async <T>(
   let page = 1;
   let allData: T[] = [];
   let hasMorePages = true;
+  let retryCount = 0;
+  const maxRetries = 3;
+  const baseDelay = 1000;
   
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
   console.log(`Starting pagination for ${url}`);
@@ -76,14 +89,53 @@ const fetchAllPages = async <T>(
       if (!linkHeader || !linkHeader.includes('rel="next"')) {
         hasMorePages = false;
       }
+
+      // Reset retry count on successful request
+      retryCount = 0;
+
+      // Check rate limit headers
+      const remaining = parseInt(response.headers['x-ratelimit-remaining'] || '0');
+      const resetTime = parseInt(response.headers['x-ratelimit-reset'] || '0') * 1000;
+      
+      if (remaining <= 1) {
+        const waitTime = resetTime - Date.now();
+        if (waitTime > 0) {
+          console.log(`Rate limit nearly exceeded, waiting for ${Math.ceil(waitTime / 1000)} seconds`);
+          await delay(waitTime);
+        }
+      }
     } catch (error) {
       console.error(`Error fetching page ${page} for ${url}:`, error);
-      if (axios.isAxiosError(error) && error.response?.status === 403) {
-        console.warn('Rate limit reached, stopping pagination');
-        hasMorePages = false;
-      } else {
-        throw error;
+      
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        
+        if (status === 403) {
+          const rateLimitRemaining = error.response?.headers?.['x-ratelimit-remaining'];
+          const rateLimitReset = error.response?.headers?.['x-ratelimit-reset'];
+          
+          if (rateLimitRemaining === '0' && rateLimitReset) {
+            const resetTime = parseInt(rateLimitReset) * 1000;
+            const waitTime = resetTime - Date.now();
+            
+            if (waitTime > 0) {
+              console.log(`Rate limit exceeded, waiting for ${Math.ceil(waitTime / 1000)} seconds`);
+              await delay(waitTime);
+              continue; // Retry the same page after waiting
+            }
+          }
+        }
       }
+      
+      if (retryCount < maxRetries) {
+        retryCount++;
+        const waitTime = baseDelay * Math.pow(2, retryCount - 1);
+        console.log(`Retrying in ${waitTime}ms (attempt ${retryCount} of ${maxRetries})`);
+        await delay(waitTime);
+        continue; // Retry the same page
+      }
+      
+      throw error;
     }
   }
   
@@ -91,12 +143,9 @@ const fetchAllPages = async <T>(
   return allData;
 };
 
-export const fetchEmployeeNames = async (employeeIds: string[], token?: string): Promise<Record<string, Employee>> => {
+export const fetchEmployeeNames = async (employeeIds: string[]): Promise<Record<string, Employee>> => {
   const employees: Record<string, Employee> = {};
   const batchSize = 10;
-  const retryDelay = 1000;
-  const maxRetries = 3;
-  const headers = token ? { Authorization: `Bearer ${token}` } : {};
   
   console.log(`Fetching employee names for ${employeeIds.length} employees`);
   
@@ -105,42 +154,22 @@ export const fetchEmployeeNames = async (employeeIds: string[], token?: string):
     console.log(`Processing batch ${i / batchSize + 1}, size: ${batch.length}`);
     
     const promises = batch.map(async id => {
-      let retries = 0;
-      while (retries < maxRetries) {
-        try {
-          const response = await github.get(`/users/${id}`, { headers });
-          if (response.data) {
-            return {
-              login: id,
-              name: response.data.name || id,
-              email: response.data.email || null,
-              avatar_url: response.data.avatar_url,
-              data: response.data
-            } as Employee;
-          }
-        } catch (error) {
-          console.error(`Error fetching user ${id}, attempt ${retries + 1}:`, error);
-          if (axios.isAxiosError(error)) {
-            if (error.response?.status === 403) {
-              console.warn(`Rate limit reached for user ${id}, waiting longer...`);
-              await new Promise(resolve => setTimeout(resolve, retryDelay * 5));
-            } else if (error.response?.status === 404) {
-              console.warn(`User ${id} not found`);
-              break;
-            }
-          }
-          retries++;
-          if (retries < maxRetries) {
-            await new Promise(resolve => setTimeout(resolve, retryDelay * retries));
-          }
-        }
+      try {
+        const response = await axios.get(`${API_URL}/employees/${id}`);
+        return {
+          login: id,
+          name: response.data.name || id,
+          email: response.data.email || null,
+          data: response.data
+        } as Employee;
+      } catch (error) {
+        console.error(`Error fetching employee ${id}:`, error);
+        return {
+          login: id,
+          name: id,
+          email: null
+        } as Employee;
       }
-      return {
-        login: id,
-        name: id,
-        email: null,
-        avatar_url: undefined
-      } as Employee;
     });
     
     const results = await Promise.all(promises);
@@ -151,11 +180,26 @@ export const fetchEmployeeNames = async (employeeIds: string[], token?: string):
     });
     
     if (i + batchSize < employeeIds.length) {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await delay(1000);
     }
   }
   
   console.log(`Finished fetching employee names. Found ${Object.keys(employees).length} employees`);
+  return employees;
+};
+
+export const fetchPodEmployees = async (podIds: string[]): Promise<PodEmployee[]> => {
+  const employees: PodEmployee[] = [];
+  
+  for (const podId of podIds) {
+    try {
+      const response = await axios.get(`${API_URL}/pods/${podId}/employees`);
+      employees.push(...response.data);
+    } catch (error) {
+      console.error(`Error fetching employees from pod ${podId}:`, error);
+    }
+  }
+  
   return employees;
 };
 
