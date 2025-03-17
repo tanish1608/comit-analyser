@@ -1,9 +1,12 @@
 import express from 'express';
 import cors from 'cors';
 import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
 
 const app = express();
 const PORT = 3001;
+const CACHE_FILE = path.join(process.cwd(), 'cache-data.json');
 
 interface CacheEntry<T> {
   data: T;
@@ -19,12 +22,41 @@ interface Cache {
 }
 
 const CACHE_TTL = 1000 * 60 * 60; // 1 hour
-const cache: Cache = {
+
+// Load cache from file if it exists
+let cache: Cache = {
   repositories: {},
   branches: {},
   commits: {},
   employees: {}
 };
+
+try {
+  if (fs.existsSync(CACHE_FILE)) {
+    const fileContent = fs.readFileSync(CACHE_FILE, 'utf-8');
+    cache = JSON.parse(fileContent);
+    console.log('Cache loaded from file');
+  }
+} catch (error) {
+  console.error('Error loading cache from file:', error);
+}
+
+// Save cache to file periodically
+const saveCache = () => {
+  try {
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(cache), 'utf-8');
+    console.log('Cache saved to file');
+  } catch (error) {
+    console.error('Error saving cache to file:', error);
+  }
+};
+
+// Save cache every 5 minutes and on process exit
+setInterval(saveCache, 5 * 60 * 1000);
+process.on('SIGINT', () => {
+  saveCache();
+  process.exit();
+});
 
 // Configure CORS before other middleware
 app.use(cors({
@@ -76,6 +108,7 @@ app.get('/api/employees/:empiId', async (req, res) => {
       expiresAt: Date.now() + CACHE_TTL
     };
     
+    saveCache(); // Save after updating
     res.json(employeeData);
   } catch (error) {
     console.error(`Error fetching employee ${empiId}:`, error);
@@ -112,6 +145,7 @@ app.get('/api/pods/:podId/employees', async (req, res) => {
       expiresAt: Date.now() + CACHE_TTL
     };
     
+    saveCache(); // Save after updating
     res.json(employees);
   } catch (error) {
     console.error(`Error fetching employees for pod ${podId}:`, error);
@@ -135,6 +169,7 @@ app.get('/api/cache/:type/:key', (req, res) => {
     if (entry) {
       delete cache[type as keyof Cache][decodeURIComponent(key)];
       console.log(`Cache entry expired for ${type}/${key}`);
+      saveCache(); // Save after deleting expired entry
     } else {
       console.log(`Cache miss for ${type}/${key}`);
     }
@@ -168,6 +203,7 @@ app.post('/api/cache/:type/:key', (req, res) => {
       expiresAt: Date.now() + CACHE_TTL,
     };
     
+    saveCache(); // Save after updating
     console.log(`Cache entry created for ${type}/${key}`);
     res.json({ success: true });
   } catch (error) {
@@ -215,6 +251,10 @@ app.post('/api/cache/clear-expired', (req, res) => {
     });
   });
   
+  if (cleared > 0) {
+    saveCache(); // Save after clearing expired entries
+  }
+  
   console.log(`Cleared ${cleared} expired cache entries`);
   res.json({ success: true, cleared });
 });
@@ -225,6 +265,7 @@ app.post('/api/cache/clear', (req, res) => {
     cache[type as keyof Cache] = {};
   });
   
+  saveCache(); // Save after clearing
   console.log('Cache cleared');
   res.json({ success: true });
 });

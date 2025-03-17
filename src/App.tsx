@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useQuery } from 'react-query';
 import { fetchOrgRepos, fetchAllRepoCommits, fetchEmployeeNames } from './api';
 import { Dashboard } from './pages/Dashboard';
-import { PodComparison } from './pages/PodComparison';
-import { Github, Loader2, Search, Calendar, Key, GitFork, AlertCircle, Users } from 'lucide-react';
+import { PodHierarchy } from './pages/PodHierarchy';
+import { Github, Loader2, Search, Calendar, Key, GitFork, AlertCircle, BarChart2, LayoutList } from 'lucide-react';
 import { Repository, UserStats, CacheStatus, Employee } from './types';
 import { DateRangePicker } from 'rsuite';
 import { subDays, startOfDay, endOfDay } from 'date-fns';
@@ -22,7 +22,7 @@ function App() {
       dateRange: params.startDate && params.endDate
         ? [new Date(params.startDate as string), new Date(params.endDate as string)]
         : [subDays(new Date(), 30), new Date()],
-      showPodComparison: params.view === 'pods'
+      view: params.view as string || 'dashboard'
     };
   };
 
@@ -37,7 +37,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [cacheStatus, setCacheStatus] = useState<CacheStatus | null>(null);
   const [employeeNames, setEmployeeNames] = useState<Record<string, Employee>>({});
-  const [showPodComparison, setShowPodComparison] = useState(initialState.showPodComparison);
+  const [view, setView] = useState<'dashboard' | 'hierarchy'>(initialState.view as any || 'dashboard');
 
   // Update URL when state changes
   useEffect(() => {
@@ -47,13 +47,13 @@ function App() {
       repos: repoInput || undefined,
       startDate: dateRange[0].toISOString(),
       endDate: dateRange[1].toISOString(),
-      view: showPodComparison ? 'pods' : undefined
+      view: view === 'dashboard' ? undefined : view
     };
 
     const queryString = qs.stringify(params, { skipNulls: true });
     const newUrl = `${window.location.pathname}${queryString ? `?${queryString}` : ''}`;
     window.history.replaceState({}, '', newUrl);
-  }, [selectedOrg, token, repoInput, dateRange, showPodComparison]);
+  }, [selectedOrg, token, repoInput, dateRange, view]);
 
   const selectedRepos = repoInput
     .split(',')
@@ -157,41 +157,6 @@ function App() {
         
         allCommits.push(...commits);
         
-        // Create a map of branch names to their commits
-        const branchCommits = new Map<string, Set<string>>();
-        
-        // Initialize branch commit sets
-        for (const branch of branches) {
-          branchCommits.set(branch.name, new Set());
-        }
-        
-        // Map commits to their branches
-        for (const branch of branches) {
-          const commitQueue = [branch.commit.sha];
-          const processedCommits = new Set<string>();
-          
-          while (commitQueue.length > 0) {
-            const currentSha = commitQueue.shift()!;
-            if (processedCommits.has(currentSha)) continue;
-            processedCommits.add(currentSha);
-            
-            const commit = commits.find(c => c.sha === currentSha);
-            if (commit) {
-              branchCommits.get(branch.name)?.add(currentSha);
-              
-              // Add parent commits to the queue
-              if (commit.parents) {
-                commit.parents.forEach(parent => {
-                  if (!processedCommits.has(parent.sha)) {
-                    commitQueue.push(parent.sha);
-                  }
-                });
-              }
-            }
-          }
-        }
-        
-        // Process commits and update user stats
         commits.forEach(commit => {
           const author = commit.author?.login || commit.commit.author.name;
           
@@ -213,10 +178,10 @@ function App() {
           
           userStats[author].repositories[repo.name].commits++;
           
-          // Find branches that contain this commit
-          const commitBranches = Array.from(branchCommits.entries())
-            .filter(([, commits]) => commits.has(commit.sha))
-            .map(([branchName]) => branchName);
+          // Add branch information
+          const commitBranches = branches
+            .filter(branch => branch.commit.sha === commit.sha)
+            .map(branch => branch.name);
           
           if (commitBranches.length > 0) {
             userStats[author].repositories[repo.name].branches = [
@@ -293,13 +258,30 @@ function App() {
             </h1>
           </div>
           {repoData?.commits && repoData.commits.length > 0 && (
-            <button
-              onClick={() => setShowPodComparison(!showPodComparison)}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors duration-200"
-            >
-              <Users className="w-5 h-5" />
-              {showPodComparison ? 'Show Dashboard' : 'Compare Pod Employees'}
-            </button>
+            <div className="flex items-center gap-4">
+              <button
+                onClick={() => setView('dashboard')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors duration-200 ${
+                  view === 'dashboard'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-white text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <BarChart2 className="w-5 h-5" />
+                Dashboard
+              </button>
+              <button
+                onClick={() => setView('hierarchy')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors duration-200 ${
+                  view === 'hierarchy'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-white text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <LayoutList className="w-5 h-5" />
+                Pod Hierarchy
+              </button>
+            </div>
           )}
         </div>
 
@@ -448,15 +430,15 @@ function App() {
         )}
 
         {repoData?.commits && repoData.commits.length > 0 && (
-          showPodComparison ? (
-            <PodComparison userStats={repoData.userStats} />
-          ) : (
+          view === 'dashboard' ? (
             <Dashboard
               commits={repoData.commits}
               dateRange={dateRange}
               userStats={repoData.userStats}
               employeeNames={employeeNames}
             />
+          ) : (
+            <PodHierarchy userStats={repoData.userStats} />
           )
         )}
 

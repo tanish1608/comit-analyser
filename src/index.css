@@ -208,3 +208,12 @@ canvas {
 .custom-transition {
   @apply transition-all duration-200;
 }
+
+/* Collapsible styles */
+.collapsible-chevron {
+  transition: transform 0.2s ease;
+}
+
+[data-state="open"] .collapsible-chevron {
+  transform: rotate(180deg);
+}
