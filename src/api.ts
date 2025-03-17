@@ -29,26 +29,16 @@ const handleApiError = (error: unknown, context: string): never => {
   console.error(`API Error in ${context}:`, error);
   if (axios.isAxiosError(error)) {
     const axiosError = error as AxiosError;
-    const status = axiosError.response?.status;
-    const rateLimitRemaining = axiosError.response?.headers?.['x-ratelimit-remaining'];
-    const rateLimitReset = axiosError.response?.headers?.['x-ratelimit-reset'];
-
-    if (status === 403 && rateLimitRemaining === '0') {
-      const resetDate = rateLimitReset ? new Date(parseInt(rateLimitReset) * 1000) : new Date();
-      const waitTime = Math.ceil((resetDate.getTime() - Date.now()) / 1000 / 60);
-      throw new Error(
-        `GitHub API rate limit exceeded. Please try again in ${waitTime} minutes or use a GitHub token.`
-      );
-    } else if (status === 404) {
+    if (axiosError.response?.status === 404) {
       throw new Error(`${context} not found`);
-    } else if (status === 401) {
+    } else if (axiosError.response?.status === 403) {
+      throw new Error(`Rate limit exceeded for ${context}. Please try again later or use a GitHub token`);
+    } else if (axiosError.response?.status === 401) {
       throw new Error(`Invalid GitHub token for ${context}`);
     }
   }
   throw new Error(`Failed to fetch ${context}`);
 };
-
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const fetchAllPages = async <T>(
   url: string,
@@ -59,9 +49,6 @@ const fetchAllPages = async <T>(
   let page = 1;
   let allData: T[] = [];
   let hasMorePages = true;
-  let retryCount = 0;
-  const maxRetries = 3;
-  const baseDelay = 1000;
   
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
   console.log(`Starting pagination for ${url}`);
@@ -89,53 +76,14 @@ const fetchAllPages = async <T>(
       if (!linkHeader || !linkHeader.includes('rel="next"')) {
         hasMorePages = false;
       }
-
-      // Reset retry count on successful request
-      retryCount = 0;
-
-      // Check rate limit headers
-      const remaining = parseInt(response.headers['x-ratelimit-remaining'] || '0');
-      const resetTime = parseInt(response.headers['x-ratelimit-reset'] || '0') * 1000;
-      
-      if (remaining <= 1) {
-        const waitTime = resetTime - Date.now();
-        if (waitTime > 0) {
-          console.log(`Rate limit nearly exceeded, waiting for ${Math.ceil(waitTime / 1000)} seconds`);
-          await delay(waitTime);
-        }
-      }
     } catch (error) {
       console.error(`Error fetching page ${page} for ${url}:`, error);
-      
-      if (axios.isAxiosError(error)) {
-        const status = error.response?.status;
-        
-        if (status === 403) {
-          const rateLimitRemaining = error.response?.headers?.['x-ratelimit-remaining'];
-          const rateLimitReset = error.response?.headers?.['x-ratelimit-reset'];
-          
-          if (rateLimitRemaining === '0' && rateLimitReset) {
-            const resetTime = parseInt(rateLimitReset) * 1000;
-            const waitTime = resetTime - Date.now();
-            
-            if (waitTime > 0) {
-              console.log(`Rate limit exceeded, waiting for ${Math.ceil(waitTime / 1000)} seconds`);
-              await delay(waitTime);
-              continue; // Retry the same page after waiting
-            }
-          }
-        }
+      if (axios.isAxiosError(error) && error.response?.status === 403) {
+        console.warn('Rate limit reached, stopping pagination');
+        hasMorePages = false;
+      } else {
+        throw error;
       }
-      
-      if (retryCount < maxRetries) {
-        retryCount++;
-        const waitTime = baseDelay * Math.pow(2, retryCount - 1);
-        console.log(`Retrying in ${waitTime}ms (attempt ${retryCount} of ${maxRetries})`);
-        await delay(waitTime);
-        continue; // Retry the same page
-      }
-      
-      throw error;
     }
   }
   
@@ -174,16 +122,8 @@ export const fetchEmployeeNames = async (employeeIds: string[], token?: string):
           console.error(`Error fetching user ${id}, attempt ${retries + 1}:`, error);
           if (axios.isAxiosError(error)) {
             if (error.response?.status === 403) {
-              const rateLimitReset = error.response?.headers?.['x-ratelimit-reset'];
-              if (rateLimitReset) {
-                const resetTime = parseInt(rateLimitReset) * 1000;
-                const waitTime = resetTime - Date.now();
-                if (waitTime > 0) {
-                  console.log(`Rate limit reached for user ${id}, waiting for ${Math.ceil(waitTime / 1000)} seconds`);
-                  await delay(waitTime);
-                  continue;
-                }
-              }
+              console.warn(`Rate limit reached for user ${id}, waiting longer...`);
+              await new Promise(resolve => setTimeout(resolve, retryDelay * 5));
             } else if (error.response?.status === 404) {
               console.warn(`User ${id} not found`);
               break;
@@ -191,7 +131,7 @@ export const fetchEmployeeNames = async (employeeIds: string[], token?: string):
           }
           retries++;
           if (retries < maxRetries) {
-            await delay(retryDelay * retries);
+            await new Promise(resolve => setTimeout(resolve, retryDelay * retries));
           }
         }
       }
@@ -211,7 +151,7 @@ export const fetchEmployeeNames = async (employeeIds: string[], token?: string):
     });
     
     if (i + batchSize < employeeIds.length) {
-      await delay(1000);
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
   }
   

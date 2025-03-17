@@ -251,7 +251,7 @@ function App() {
     <div className="min-h-screen bg-gray-100 py-8 px-4">
       <div className="max-w-7xl mx-auto">
         <div className="flex items-center gap-3 mb-8">
-          <Github className="w-10 h-10 text-indigo-600 animate-pulse" />
+          <Github className="w-10 h-10 text-indigo-600" />
           <h1 className="text-3xl font-bold text-gray-900">
             GitHub Organization Commit Analyzer
           </h1>
@@ -347,11 +347,6 @@ function App() {
                 id="repos"
                 value={repoInput}
                 onChange={(e) => setRepoInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                  }
-                }}
                 placeholder="Enter repository names separated by commas (e.g., repo1, repo2)"
                 className="input-field pl-10"
                 disabled={isLoading}
@@ -389,20 +384,8 @@ function App() {
 
         {isLoading && (
           <div className="loading">
-            <div className="flex flex-col items-center gap-4">
-              <div className="relative">
-                <div className="w-16 h-16 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
-                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-                  <Github className="w-8 h-8 text-indigo-600" />
-                </div>
-              </div>
-              <p className="text-lg font-medium text-gray-700">
-                Fetching commit data from all branches...
-              </p>
-              <div className="w-48 h-2 bg-gray-200 rounded-full overflow-hidden">
-                <div className="h-full bg-indigo-600 animate-pulse"></div>
-              </div>
-            </div>
+            <Loader2 className="w-8 h-8 animate-spin" />
+            <span>Fetching commit data from all branches...</span>
           </div>
         )}
 
