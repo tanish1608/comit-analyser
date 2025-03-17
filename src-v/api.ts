@@ -418,3 +418,34 @@ export const fetchAllRepoCommits = async (
     return { commits: [], branches: [] };
   }
 };
+
+export const fetchPodEmployees = async (pods: Pod[]): Promise<PodEmployee[]> => {
+  const employees: PodEmployee[] = [];
+  
+  for (const pod of pods) {
+    try {
+      const response = await axios.get(pod.apiUrl);
+      const podEmployees = response.data.map((emp: any) => ({
+        empiId: emp.empiId,
+        name: emp.name,
+        pod: pod.name,
+        hasCommits: false
+      }));
+      employees.push(...podEmployees);
+    } catch (error) {
+      console.error(`Error fetching employees from pod ${pod.name}:`, error);
+    }
+  }
+  
+  return employees;
+};
+
+export const compareEmployeesWithCommits = (
+  podEmployees: PodEmployee[],
+  commitStats: Record<string, UserStats>
+): PodEmployee[] => {
+  return podEmployees.map(employee => ({
+    ...employee,
+    hasCommits: !!commitStats[employee.empiId]
+  }));
+};

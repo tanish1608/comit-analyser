@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useQuery } from 'react-query';
 import { fetchOrgRepos, fetchAllRepoCommits, fetchEmployeeNames } from './api';
 import { Dashboard } from './pages/Dashboard';
-import { Github, Loader2, Search, Calendar, Key, GitFork, AlertCircle } from 'lucide-react';
+import { PodComparison } from './pages/PodComparison';
+import { Github, Loader2, Search, Calendar, Key, GitFork, AlertCircle, Users } from 'lucide-react';
 import { Repository, UserStats, CacheStatus, Employee } from './types';
 import { DateRangePicker } from 'rsuite';
 import { subDays, startOfDay, endOfDay } from 'date-fns';
@@ -19,6 +20,7 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [cacheStatus, setCacheStatus] = useState<CacheStatus | null>(null);
   const [employeeNames, setEmployeeNames] = useState<Record<string, Employee>>({});
+  const [showPodComparison, setShowPodComparison] = useState(false);
 
   const selectedRepos = repoInput
     .split(',')
@@ -250,11 +252,22 @@ function App() {
   return (
     <div className="min-h-screen bg-gray-100 py-8 px-4">
       <div className="max-w-7xl mx-auto">
-        <div className="flex items-center gap-3 mb-8">
-          <Github className="w-10 h-10 text-indigo-600 animate-pulse" />
-          <h1 className="text-3xl font-bold text-gray-900">
-            GitHub Organization Commit Analyzer
-          </h1>
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center gap-3">
+            <Github className="w-10 h-10 text-indigo-600 animate-pulse" />
+            <h1 className="text-3xl font-bold text-gray-900">
+              GitHub Organization Commit Analyzer
+            </h1>
+          </div>
+          {repoData?.commits && repoData.commits.length > 0 && (
+            <button
+              onClick={() => setShowPodComparison(!showPodComparison)}
+              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors duration-200"
+            >
+              <Users className="w-5 h-5" />
+              {showPodComparison ? 'Show Dashboard' : 'Compare Pod Employees'}
+            </button>
+          )}
         </div>
 
         {errorMessage && (
@@ -407,12 +420,16 @@ function App() {
         )}
 
         {repoData?.commits && repoData.commits.length > 0 && (
-          <Dashboard
-            commits={repoData.commits}
-            dateRange={dateRange}
-            userStats={repoData.userStats}
-            employeeNames={employeeNames}
-          />
+          showPodComparison ? (
+            <PodComparison userStats={repoData.userStats} />
+          ) : (
+            <Dashboard
+              commits={repoData.commits}
+              dateRange={dateRange}
+              userStats={repoData.userStats}
+              employeeNames={employeeNames}
+            />
+          )
         )}
 
         {selectedOrg && !isLoading && (!repoData?.commits || repoData.commits.length === 0) && (
