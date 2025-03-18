@@ -3,32 +3,17 @@ import cors from 'cors';
 import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
+import { subMonths, isAfter, parseISO } from 'date-fns';
 
 const app = express();
 const PORT = 3001;
 const CACHE_FILE = path.join(process.cwd(), 'cache-data.json');
+const CACHE_RETENTION_MONTHS = 4;
 
-interface CacheEntry<T> {
-  data: T;
-  timestamp: number;
-  expiresAt: number;
-}
-
-interface Cache {
-  repositories: { [key: string]: CacheEntry<any> };
-  branches: { [key: string]: CacheEntry<any> };
-  commits: { [key: string]: CacheEntry<any> };
-  employees: { [key: string]: CacheEntry<any> };
-}
-
-const CACHE_TTL = 1000 * 60 * 60; // 1 hour
-
-// Load cache from file if it exists
-let cache: Cache = {
-  repositories: {},
-  branches: {},
-  commits: {},
-  employees: {}
+// Initialize cache from file
+let cache = {
+  lastUpdated: '',
+  organizations: {}
 };
 
 try {
@@ -41,33 +26,50 @@ try {
   console.error('Error loading cache from file:', error);
 }
 
-// Save cache to file periodically
+// Save cache to file
 const saveCache = () => {
   try {
-    fs.writeFileSync(CACHE_FILE, JSON.stringify(cache), 'utf-8');
+    cache.lastUpdated = new Date().toISOString();
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(cache, null, 2), 'utf-8');
     console.log('Cache saved to file');
   } catch (error) {
     console.error('Error saving cache to file:', error);
   }
 };
 
-// Save cache every 5 minutes and on process exit
-setInterval(saveCache, 5 * 60 * 1000);
-process.on('SIGINT', () => {
+// Clean old data
+const cleanOldData = () => {
+  const cutoffDate = subMonths(new Date(), CACHE_RETENTION_MONTHS);
+  
+  Object.entries(cache.organizations).forEach(([orgName, orgData]) => {
+    Object.entries(orgData.commits).forEach(([repoName, repoData]) => {
+      repoData.data = repoData.data.filter(commit => 
+        isAfter(parseISO(commit.commit.author.date), cutoffDate)
+      );
+      
+      if (repoData.data.length === 0) {
+        delete orgData.commits[repoName];
+      }
+    });
+    
+    if (Object.keys(orgData.commits).length === 0) {
+      delete cache.organizations[orgName];
+    }
+  });
+  
   saveCache();
-  process.exit();
-});
+};
 
-// Configure CORS before other middleware
+// Configure middleware
 app.use(cors({
   origin: ['http://localhost:5173', 'http://localhost:3000'],
-  methods: ['GET', 'POST'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true
 }));
 
 app.use(express.json({ limit: '50mb' }));
 
-// Add request logging middleware
+// Logging middleware
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
   next();
@@ -75,199 +77,126 @@ app.use((req, res, next) => {
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
-  console.log('Health check request received');
-  res.json({ status: 'ok' });
+  res.json({ status: 'ok', lastUpdated: cache.lastUpdated });
 });
 
-// Employee name fetching endpoint
-app.get('/api/employees/:empiId', async (req, res) => {
-  const { empiId } = req.params;
+// Get cached data for organization
+app.get('/api/cache/org/:orgName', (req, res) => {
+  const { orgName } = req.params;
+  const orgData = cache.organizations[orgName];
   
-  try {
-    // Check cache first
-    const cacheKey = `employee_${empiId}`;
-    const cachedData = cache.employees[cacheKey];
-    
-    if (cachedData && Date.now() < cachedData.expiresAt) {
-      console.log(`Cache hit for employee ${empiId}`);
-      return res.json(cachedData.data);
-    }
-    
-    // Fetch from employee API
-    const response = await axios.get(`https://api.example.com/employees/${empiId}`);
-    const employeeData = {
-      name: response.data.name,
-      email: response.data.email,
-      department: response.data.department
+  if (!orgData) {
+    return res.status(404).json({ error: 'Organization not found in cache' });
+  }
+  
+  res.json(orgData);
+});
+
+// Store organization data in cache
+app.post('/api/cache/org/:orgName', (req, res) => {
+  const { orgName } = req.params;
+  const { repositories, commits, branches } = req.body;
+  
+  if (!cache.organizations[orgName]) {
+    cache.organizations[orgName] = {
+      lastFetched: new Date().toISOString(),
+      repositories: [],
+      commits: {},
+      branches: {}
     };
-    
-    // Cache the result
-    cache.employees[cacheKey] = {
-      data: employeeData,
-      timestamp: Date.now(),
-      expiresAt: Date.now() + CACHE_TTL
-    };
-    
-    saveCache(); // Save after updating
-    res.json(employeeData);
-  } catch (error) {
-    console.error(`Error fetching employee ${empiId}:`, error);
-    res.status(500).json({ error: 'Failed to fetch employee data' });
   }
+  
+  const orgData = cache.organizations[orgName];
+  
+  if (repositories) {
+    orgData.repositories = repositories;
+  }
+  
+  if (commits) {
+    Object.entries(commits).forEach(([repoName, commitData]) => {
+      if (!orgData.commits[repoName]) {
+        orgData.commits[repoName] = {
+          data: [],
+          lastFetched: new Date().toISOString()
+        };
+      }
+      
+      // Merge new commits with existing ones, avoiding duplicates
+      const existingCommits = new Set(orgData.commits[repoName].data.map(c => c.sha));
+      commitData.forEach(commit => {
+        if (!existingCommits.has(commit.sha)) {
+          orgData.commits[repoName].data.push(commit);
+        }
+      });
+    });
+  }
+  
+  if (branches) {
+    Object.entries(branches).forEach(([repoName, branchData]) => {
+      orgData.branches[repoName] = {
+        data: branchData,
+        lastFetched: new Date().toISOString()
+      };
+    });
+  }
+  
+  cleanOldData();
+  saveCache();
+  
+  res.json({
+    success: true,
+    message: 'Cache updated successfully',
+    timestamp: new Date().toISOString()
+  });
 });
 
-// Pod employees fetching endpoint
-app.get('/api/pods/:podId/employees', async (req, res) => {
-  const { podId } = req.params;
+// Get filtered commits
+app.get('/api/cache/commits/:orgName', (req, res) => {
+  const { orgName } = req.params;
+  const { startDate, endDate, repository } = req.query;
   
-  try {
-    // Check cache first
-    const cacheKey = `pod_${podId}`;
-    const cachedData = cache.employees[cacheKey];
-    
-    if (cachedData && Date.now() < cachedData.expiresAt) {
-      console.log(`Cache hit for pod ${podId}`);
-      return res.json(cachedData.data);
-    }
-    
-    // Fetch from pod API
-    const response = await axios.get(`https://api.example.com/pods/${podId}/employees`);
-    const employees = response.data.map((emp: any) => ({
-      empiId: emp.empiId,
-      name: emp.name,
-      pod: podId
-    }));
-    
-    // Cache the result
-    cache.employees[cacheKey] = {
-      data: employees,
-      timestamp: Date.now(),
-      expiresAt: Date.now() + CACHE_TTL
-    };
-    
-    saveCache(); // Save after updating
-    res.json(employees);
-  } catch (error) {
-    console.error(`Error fetching employees for pod ${podId}:`, error);
-    res.status(500).json({ error: 'Failed to fetch pod employees' });
+  const orgData = cache.organizations[orgName];
+  if (!orgData) {
+    return res.status(404).json({ error: 'Organization not found in cache' });
   }
+  
+  let commits = [];
+  
+  if (repository) {
+    const repoCommits = orgData.commits[repository as string]?.data || [];
+    commits = repoCommits;
+  } else {
+    commits = Object.values(orgData.commits)
+      .flatMap(repo => repo.data);
+  }
+  
+  if (startDate && endDate) {
+    const start = parseISO(startDate as string);
+    const end = parseISO(endDate as string);
+    
+    commits = commits.filter(commit => {
+      const commitDate = parseISO(commit.commit.author.date);
+      return isAfter(commitDate, start) && isAfter(end, commitDate);
+    });
+  }
+  
+  res.json(commits);
 });
 
-// Generic cache get endpoint
-app.get('/api/cache/:type/:key', (req, res) => {
-  const { type, key } = req.params;
-  console.log(`Cache GET request for ${type}/${key}`);
-  
-  if (!cache[type as keyof Cache]) {
-    console.log(`Invalid cache type: ${type}`);
-    return res.status(404).json({ error: 'Invalid cache type' });
-  }
-  
-  const entry = cache[type as keyof Cache][decodeURIComponent(key)];
-  
-  if (!entry || Date.now() > entry.expiresAt) {
-    if (entry) {
-      delete cache[type as keyof Cache][decodeURIComponent(key)];
-      console.log(`Cache entry expired for ${type}/${key}`);
-      saveCache(); // Save after deleting expired entry
-    } else {
-      console.log(`Cache miss for ${type}/${key}`);
-    }
-    return res.status(404).json({ error: 'Cache miss' });
-  }
-  
-  console.log(`Cache hit for ${type}/${key}`);
-  res.json(entry.data);
-});
-
-// Generic cache set endpoint
-app.post('/api/cache/:type/:key', (req, res) => {
-  const { type, key } = req.params;
-  const { data } = req.body;
-  console.log(`Cache POST request for ${type}/${key}`);
-  
-  if (!cache[type as keyof Cache]) {
-    console.log(`Invalid cache type: ${type}`);
-    return res.status(400).json({ error: 'Invalid cache type' });
-  }
-  
-  if (!data) {
-    console.log('No data provided');
-    return res.status(400).json({ error: 'No data provided' });
-  }
-  
-  try {
-    cache[type as keyof Cache][decodeURIComponent(key)] = {
-      data,
-      timestamp: Date.now(),
-      expiresAt: Date.now() + CACHE_TTL,
-    };
-    
-    saveCache(); // Save after updating
-    console.log(`Cache entry created for ${type}/${key}`);
-    res.json({ success: true });
-  } catch (error) {
-    console.error('Error creating cache entry:', error);
-    res.status(500).json({ error: 'Failed to create cache entry' });
-  }
-});
-
-// Get cache statistics
-app.get('/api/cache/stats', (req, res) => {
-  const stats = {
-    repositories: {
-      count: Object.keys(cache.repositories).length,
-      size: JSON.stringify(cache.repositories).length,
-    },
-    branches: {
-      count: Object.keys(cache.branches).length,
-      size: JSON.stringify(cache.branches).length,
-    },
-    commits: {
-      count: Object.keys(cache.commits).length,
-      size: JSON.stringify(cache.commits).length,
-    },
-    employees: {
-      count: Object.keys(cache.employees).length,
-      size: JSON.stringify(cache.employees).length,
-    },
-    totalSize: JSON.stringify(cache).length,
+// Clear cache
+app.delete('/api/cache', (req, res) => {
+  cache = {
+    lastUpdated: '',
+    organizations: {}
   };
   
-  res.json(stats);
-});
-
-// Clear expired cache entries
-app.post('/api/cache/clear-expired', (req, res) => {
-  const now = Date.now();
-  let cleared = 0;
+  saveCache();
   
-  Object.keys(cache).forEach((type) => {
-    Object.keys(cache[type as keyof Cache]).forEach((key) => {
-      if (now > cache[type as keyof Cache][key].expiresAt) {
-        delete cache[type as keyof Cache][key];
-        cleared++;
-      }
-    });
+  res.json({
+    success: true,
+    message: 'Cache cleared successfully',
+    timestamp: new Date().toISOString()
   });
-  
-  if (cleared > 0) {
-    saveCache(); // Save after clearing expired entries
-  }
-  
-  console.log(`Cleared ${cleared} expired cache entries`);
-  res.json({ success: true, cleared });
-});
-
-// Clear all cache
-app.post('/api/cache/clear', (req, res) => {
-  Object.keys(cache).forEach((type) => {
-    cache[type as keyof Cache] = {};
-  });
-  
-  saveCache(); // Save after clearing
-  console.log('Cache cleared');
-  res.json({ success: true });
 });
 
 // Error handling middleware
@@ -278,4 +207,5 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
 
 app.listen(PORT, () => {
   console.log(`Cache server running on http://localhost:${PORT}`);
+  cleanOldData(); // Clean old data on startup
 });

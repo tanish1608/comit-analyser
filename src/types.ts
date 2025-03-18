@@ -1,5 +1,3 @@
-import { Repository, Commit, Branch, Employee } from './types';
-
 export interface Repository {
   id: number;
   name: string;
@@ -70,4 +68,37 @@ export interface PodEmployee {
 export interface Pod {
   name: string;
   apiUrl: string;
+}
+
+export interface CachedData {
+  lastUpdated: string;
+  organizations: {
+    [orgName: string]: {
+      lastFetched: string;
+      repositories: Repository[];
+      commits: {
+        [repoName: string]: {
+          data: Commit[];
+          lastFetched: string;
+        };
+      };
+      branches: {
+        [repoName: string]: {
+          data: Branch[];
+          lastFetched: string;
+        };
+      };
+    };
+  };
+}
+
+export interface CacheOperationStatus {
+  success: boolean;
+  message: string;
+  timestamp: string;
+}
+
+export interface AdminUser {
+  email: string;
+  password: string;
 }
