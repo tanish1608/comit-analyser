@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { format } from 'date-fns';
 import { Commit, UserStats, Employee } from '../types';
 import { Users, GitCommit, GitBranch, GitFork, FileDown, ChevronDown, ChevronUp, BarChart2 } from 'lucide-react';
@@ -15,6 +15,27 @@ interface DashboardProps {
 export const Dashboard: React.FC<DashboardProps> = ({ commits, dateRange, userStats, employeeNames }) => {
   const [expandedUsers, setExpandedUsers] = useState<Set<string>>(new Set(Object.keys(userStats)));
   const [showAnalytics, setShowAnalytics] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [filteredCommits, setFilteredCommits] = useState<Commit[]>(commits);
+
+  useEffect(() => {
+    if (selectedDate) {
+      const filtered = commits.filter(commit => commit.date === selectedDate);
+      setFilteredCommits(filtered);
+    } else {
+      setFilteredCommits(commits);
+    }
+  }, [selectedDate, commits]);
+
+  const commitDates = useMemo(() => {
+    const dates = new Set<string>();
+    commits.forEach(commit => {
+      if (commit.date) {
+        dates.add(commit.date);
+      }
+    });
+    return Array.from(dates).sort();
+  }, [commits]);
 
   const toggleUser = (authorId: string) => {
     setExpandedUsers(prev => {
@@ -89,18 +110,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ commits, dateRange, userSt
             {showAnalytics ? 'Show Overview' : 'Show Analytics'}
           </button>
         </div>
-        <button 
-          onClick={handleExportToExcel}
-          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors duration-200"
-        >
-          <FileDown className="w-4 h-4" />
-          Export to Excel
-        </button>
+        <div className="flex items-center gap-4">
+          <select
+            value={selectedDate || ''}
+            onChange={(e) => setSelectedDate(e.target.value || null)}
+            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+          >
+            <option value="">All dates</option>
+            {commitDates.map(date => (
+              <option key={date} value={date}>{date}</option>
+            ))}
+          </select>
+          <button 
+            onClick={handleExportToExcel}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors duration-200"
+          >
+            <FileDown className="w-4 h-4" />
+            Export to Excel
+          </button>
+        </div>
       </div>
 
       {showAnalytics ? (
         <Analytics
-          commits={commits}
+          commits={filteredCommits}
           dateRange={dateRange}
           userStats={userStats}
         />
@@ -120,7 +153,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ commits, dateRange, userSt
                 <GitCommit className="w-5 h-5 text-indigo-600" />
                 <h3>Total Commits</h3>
               </div>
-              <p className="stat-number">{commits.length}</p>
+              <p className="stat-number">{filteredCommits.length}</p>
+              {selectedDate && (
+                <p className="text-sm text-gray-600 mt-1">
+                  Showing commits for {selectedDate}
+                </p>
+              )}
             </div>
 
             <div className="stat-card transform hover:scale-105 transition-transform duration-200">

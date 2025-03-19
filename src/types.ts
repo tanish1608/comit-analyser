@@ -1,3 +1,5 @@
+import { ReactNode } from 'react';
+
 export interface Repository {
   id: number;
   name: string;
@@ -26,6 +28,8 @@ export interface Commit {
     avatar_url: string;
   } | null;
   parents?: Array<{ sha: string }>;
+  timestamp?: number;
+  date?: string;
 }
 
 export interface Employee {
@@ -46,6 +50,10 @@ export interface UserStats {
     [repoName: string]: {
       commits: number;
       branches: string[];
+      commitDates: {
+        date: string;
+        count: number;
+      }[];
     };
   };
 }
@@ -70,35 +78,24 @@ export interface Pod {
   apiUrl: string;
 }
 
-export interface CachedData {
-  lastUpdated: string;
-  organizations: {
-    [orgName: string]: {
-      lastFetched: string;
-      repositories: Repository[];
-      commits: {
-        [repoName: string]: {
-          data: Commit[];
-          lastFetched: string;
-        };
-      };
-      branches: {
-        [repoName: string]: {
-          data: Branch[];
-          lastFetched: string;
-        };
-      };
-    };
-  };
+export interface CommitFilter {
+  startDate?: Date;
+  endDate?: Date;
+  author?: string;
+  repository?: string;
 }
 
-export interface CacheOperationStatus {
-  success: boolean;
-  message: string;
-  timestamp: string;
-}
-
-export interface AdminUser {
-  email: string;
+export interface AdminCredentials {
+  username: string;
   password: string;
+}
+
+export interface AuthContextType {
+  isAdmin: boolean;
+  login: (credentials: AdminCredentials) => Promise<void>;
+  logout: () => void;
+}
+
+export interface AuthProviderProps {
+  children: ReactNode;
 }

@@ -1,5 +1,6 @@
 import axios, { AxiosError } from 'axios';
 import { Repository, Commit, Branch, Employee, PodEmployee } from './types';
+import { subMonths } from 'date-fns';
 
 const API_URL = 'http://localhost:3001/api';
 const github = axios.create({
@@ -10,13 +11,20 @@ const github = axios.create({
   params: {
     per_page: 100,
   },
+  timeout: 30000,
+  validateStatus: (status) => {
+    return status >= 200 && status < 600;
+  },
 });
 
 // Check if cache server is running
 const checkCacheServer = async () => {
   try {
     console.log('Checking cache server status...');
-    const response = await axios.get(`${API_URL}/health`);
+    const response = await axios.get(`${API_URL}/health`, {
+      timeout: 5000,
+      validateStatus: (status) => status === 200,
+    });
     console.log('Cache server status:', response.data);
     return response.data.status === 'ok';
   } catch (error) {
@@ -33,7 +41,13 @@ const handleApiError = (error: unknown, context: string): never => {
     const rateLimitRemaining = axiosError.response?.headers?.['x-ratelimit-remaining'];
     const rateLimitReset = axiosError.response?.headers?.['x-ratelimit-reset'];
 
-    if (status === 403 && rateLimitRemaining === '0') {
+    if (!axiosError.response) {
+      throw new Error(`Connection error: Unable to reach GitHub API. Please check your internet connection and try again.`);
+    }
+
+    if (status === 530) {
+      throw new Error('Server connection error. Please try again in a few minutes.');
+    } else if (status === 403 && rateLimitRemaining === '0') {
       const resetDate = rateLimitReset ? new Date(parseInt(rateLimitReset) * 1000) : new Date();
       const waitTime = Math.ceil((resetDate.getTime() - Date.now()) / 1000 / 60);
       throw new Error(
@@ -43,6 +57,8 @@ const handleApiError = (error: unknown, context: string): never => {
       throw new Error(`${context} not found`);
     } else if (status === 401) {
       throw new Error(`Invalid GitHub token for ${context}`);
+    } else if (status >= 500) {
+      throw new Error(`GitHub server error (${status}). Please try again later.`);
     }
   }
   throw new Error(`Failed to fetch ${context}`);
@@ -74,6 +90,14 @@ const fetchAllPages = async <T>(
         headers
       });
       
+      if (response.status === 530) {
+        throw new Error('Server connection error (530). Please try again in a few minutes.');
+      }
+
+      if (response.status >= 500) {
+        throw new Error(`GitHub server error (${response.status}). Please try again later.`);
+      }
+      
       const data = response.data;
       console.log(`Received ${data?.length || 0} items from page ${page}`);
       
@@ -84,16 +108,13 @@ const fetchAllPages = async <T>(
         page++;
       }
       
-      // Check for last page using Link header
       const linkHeader = response.headers.link;
       if (!linkHeader || !linkHeader.includes('rel="next"')) {
         hasMorePages = false;
       }
 
-      // Reset retry count on successful request
       retryCount = 0;
 
-      // Check rate limit headers
       const remaining = parseInt(response.headers['x-ratelimit-remaining'] || '0');
       const resetTime = parseInt(response.headers['x-ratelimit-reset'] || '0') * 1000;
       
@@ -121,18 +142,20 @@ const fetchAllPages = async <T>(
             if (waitTime > 0) {
               console.log(`Rate limit exceeded, waiting for ${Math.ceil(waitTime / 1000)} seconds`);
               await delay(waitTime);
-              continue; // Retry the same page after waiting
+              continue;
             }
           }
         }
-      }
-      
-      if (retryCount < maxRetries) {
-        retryCount++;
-        const waitTime = baseDelay * Math.pow(2, retryCount - 1);
-        console.log(`Retrying in ${waitTime}ms (attempt ${retryCount} of ${maxRetries})`);
-        await delay(waitTime);
-        continue; // Retry the same page
+
+        if (status === 530 || (status && status >= 500)) {
+          if (retryCount < maxRetries) {
+            retryCount++;
+            const waitTime = baseDelay * Math.pow(2, retryCount - 1);
+            console.log(`Server error (${status}), retrying in ${waitTime}ms (attempt ${retryCount} of ${maxRetries})`);
+            await delay(waitTime);
+            continue;
+          }
+        }
       }
       
       throw error;
@@ -141,6 +164,30 @@ const fetchAllPages = async <T>(
   
   console.log(`Finished fetching all pages for ${url}. Total items: ${allData.length}`);
   return allData;
+};
+
+// Get the last cached commit date for an organization
+const getLastCachedCommitDate = async (org: string): Promise<Date | null> => {
+  try {
+    const response = await axios.get(`${API_URL}/cache/last-commit-date/${org}`);
+    return response.data.lastCommitDate ? new Date(response.data.lastCommitDate) : null;
+  } catch (error) {
+    console.log('No cached commit date found');
+    return null;
+  }
+};
+
+// Clean up old commits (older than 4 months)
+const cleanupOldCommits = async (org: string) => {
+  try {
+    const fourMonthsAgo = subMonths(new Date(), 4);
+    await axios.post(`${API_URL}/cache/cleanup/${org}`, {
+      olderThan: fourMonthsAgo.toISOString()
+    });
+    console.log('Cleaned up old commits');
+  } catch (error) {
+    console.error('Error cleaning up old commits:', error);
+  }
 };
 
 export const fetchEmployeeNames = async (employeeIds: string[]): Promise<Record<string, Employee>> => {
@@ -155,7 +202,10 @@ export const fetchEmployeeNames = async (employeeIds: string[]): Promise<Record<
     
     const promises = batch.map(async id => {
       try {
-        const response = await axios.get(`${API_URL}/employees/${id}`);
+        const response = await axios.get(`${API_URL}/employees/${id}`, {
+          timeout: 5000,
+          validateStatus: (status) => status === 200,
+        });
         return {
           login: id,
           name: response.data.name || id,
@@ -193,7 +243,10 @@ export const fetchPodEmployees = async (podIds: string[]): Promise<PodEmployee[]
   
   for (const podId of podIds) {
     try {
-      const response = await axios.get(`${API_URL}/pods/${podId}/employees`);
+      const response = await axios.get(`${API_URL}/pods/${podId}/employees`, {
+        timeout: 5000,
+        validateStatus: (status) => status === 200,
+      });
       employees.push(...response.data);
     } catch (error) {
       console.error(`Error fetching employees from pod ${podId}:`, error);
@@ -341,13 +394,18 @@ export const fetchBranchCommits = async (
     
     console.log(`Found ${commits.length} commits before filtering`);
     
-    // Filter out merge commits and pull request commits
-    const filteredCommits = commits.filter(commit => {
-      const message = commit.commit.message.toLowerCase();
-      return !message.includes('merge') && 
-             !message.includes('pull request') && 
-             !message.includes('pr #');
-    });
+    const filteredCommits = commits
+      .filter(commit => {
+        const message = commit.commit.message.toLowerCase();
+        return !message.includes('merge') && 
+               !message.includes('pull request') && 
+               !message.includes('pr #');
+      })
+      .map(commit => ({
+        ...commit,
+        timestamp: new Date(commit.commit.author.date).getTime(),
+        date: commit.commit.author.date.split('T')[0]
+      }));
     
     console.log(`Filtered to ${filteredCommits.length} commits`);
     
@@ -400,5 +458,31 @@ export const fetchAllRepoCommits = async (
   } catch (error) {
     console.error(`Error fetching data for ${repo.full_name}:`, error);
     return { commits: [], branches: [] };
+  }
+};
+
+export const cacheOrgData = async (
+  org: string,
+  token?: string
+): Promise<void> => {
+  const lastCachedDate = await getLastCachedCommitDate(org);
+  const endDate = new Date();
+  const startDate = lastCachedDate || subMonths(endDate, 4);
+
+  console.log('Caching data from', startDate, 'to', endDate);
+
+  try {
+    const repos = await fetchOrgRepos(org, token);
+    
+    for (const repo of repos) {
+      const { commits } = await fetchAllRepoCommits(repo, token, startDate, endDate);
+      console.log(`Cached ${commits.length} commits for ${repo.full_name}`);
+    }
+
+    // Clean up old commits
+    await cleanupOldCommits(org);
+  } catch (error) {
+    console.error('Error caching organization data:', error);
+    throw error;
   }
 };

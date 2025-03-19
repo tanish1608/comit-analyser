@@ -1,24 +1,27 @@
 import React, { useState, useEffect } from 'react';
 import { useQuery } from 'react-query';
-import { fetchOrgRepos, fetchAllRepoCommits, fetchEmployeeNames } from './api';
+import { fetchOrgRepos, fetchAllRepoCommits, fetchEmployeeNames, cacheOrgData } from './api';
 import { Dashboard } from './pages/Dashboard';
 import { PodHierarchy } from './pages/PodHierarchy';
-import { Github, Loader2, Search, Calendar, Key, GitFork, AlertCircle, BarChart2, LayoutList, Save, Database, Lock, LogIn, LogOut } from 'lucide-react';
-import { Repository, UserStats, CacheStatus, Employee, CacheOperationStatus } from './types';
+import { AdminLogin } from './components/AdminLogin';
+import { useAuth } from './contexts/AuthContext';
+import { Github, Loader2, Search, Calendar, Key, GitFork, AlertCircle, BarChart2, LayoutList, Clock, Database } from 'lucide-react';
+import { Repository, UserStats, CacheStatus, Employee } from './types';
 import { DateRangePicker } from 'rsuite';
-import { subDays, startOfDay, endOfDay, format, parseISO } from 'date-fns';
+import { subDays, startOfDay, endOfDay, subMonths } from 'date-fns';
 import qs from 'qs';
-import axios from 'axios';
-import * as Toast from '@radix-ui/react-toast';
 import 'rsuite/dist/rsuite.min.css';
-import { validateAdmin } from './auth';
 
 function App() {
+  const { isAdmin } = useAuth();
+  const [showControls, setShowControls] = useState(false);
+
+  // Parse URL parameters
   const getInitialState = () => {
     const params = qs.parse(window.location.search, { ignoreQueryPrefix: true });
     return {
-      org: params.org as string || '',
-      selectedOrg: params.org as string || '',
+      org: (params.org as string || '').trim(),
+      selectedOrg: (params.org as string || '').trim(),
       token: params.token as string || '',
       repoInput: params.repos as string || '',
       dateRange: params.startDate && params.endDate
@@ -41,38 +44,37 @@ function App() {
   const [cacheStatus, setCacheStatus] = useState<CacheStatus | null>(null);
   const [employeeNames, setEmployeeNames] = useState<Record<string, Employee>>({});
   const [view, setView] = useState<'dashboard' | 'hierarchy'>(initialState.view as any || 'dashboard');
-  const [toast, setToast] = useState<{ open: boolean; title: string; description: string }>({
-    open: false,
-    title: '',
-    description: ''
-  });
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [adminEmail, setAdminEmail] = useState('');
-  const [adminPassword, setAdminPassword] = useState('');
-  const [showLoginModal, setShowLoginModal] = useState(false);
 
-  // Check for cached data on mount
+  // Check if current time is within allowed hours (8 AM to 12 AM GMT)
+  const isWithinAllowedHours = () => {
+    const now = new Date();
+    const hours = now.getUTCHours();
+    return hours >= 8 && hours < 24;
+  };
+
+  // Time restriction message state
+  const [timeRestrictionMessage, setTimeRestrictionMessage] = useState<string>('');
+
+  // Update time restriction message every minute
   useEffect(() => {
-    const checkCache = async () => {
-      if (selectedOrg) {
-        try {
-          const response = await axios.get(`http://localhost:3001/api/cache/org/${selectedOrg}`);
-          if (response.data) {
-            setCacheStatus({
-              type: 'commits',
-              org: selectedOrg,
-              timestamp: new Date(response.data.lastFetched),
-              count: Object.values(response.data.commits).reduce((acc: number, repo: any) => acc + repo.data.length, 0),
-              source: 'Cache'
-            });
-          }
-        } catch (error) {
-          console.log('No cached data found');
+    const updateTimeMessage = () => {
+      if (isWithinAllowedHours()) {
+        setTimeRestrictionMessage('');
+      } else {
+        const nextAllowedTime = new Date();
+        nextAllowedTime.setUTCHours(8, 0, 0, 0);
+        if (nextAllowedTime < new Date()) {
+          nextAllowedTime.setDate(nextAllowedTime.getDate() + 1);
         }
+        const waitHours = Math.ceil((nextAllowedTime.getTime() - Date.now()) / (1000 * 60 * 60));
+        setTimeRestrictionMessage(`Fetching is restricted until 8 AM GMT (${waitHours} hours remaining)`);
       }
     };
-    checkCache();
-  }, [selectedOrg]);
+
+    updateTimeMessage();
+    const interval = setInterval(updateTimeMessage, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Update URL when state changes
   useEffect(() => {
@@ -106,27 +108,35 @@ function App() {
       if (!selectedOrg) {
         throw new Error('Organization name is required');
       }
-      return fetchOrgRepos(selectedOrg, token);
+      const trimmedOrg = selectedOrg.trim();
+      if (!trimmedOrg) {
+        throw new Error('Organization name cannot be empty');
+      }
+      console.log('Fetching repos for org:', trimmedOrg);
+      return fetchOrgRepos(trimmedOrg, token);
     },
     {
       enabled: shouldFetchRepos,
       retry: 1,
       retryDelay: 1000,
       onSuccess: (data) => {
+        console.log('Successfully fetched repos:', data?.length);
         setError(null);
         setCacheStatus({
           type: 'repositories',
-          org: selectedOrg,
+          org: selectedOrg.trim(),
           timestamp: new Date(),
           count: data.length,
-          source: 'API'
+          source: 'Unknown'
         });
       },
       onError: (error: Error) => {
+        console.error('Error fetching repos:', error);
         setIsAnalyzing(false);
+        setIsCaching(false);
         
         if (error.message.includes('404')) {
-          setError(`Organization "${selectedOrg}" not found. Please check the organization name and try again.`);
+          setError(`Organization "${selectedOrg.trim()}" not found. Please check the organization name and try again.`);
         } else if (error.message.includes('401')) {
           setError('Invalid or missing GitHub token. Please check your token and try again.');
         } else if (error.message.includes('403')) {
@@ -147,16 +157,20 @@ function App() {
     ['commits', selectedOrg, selectedRepos, dateRange, token],
     async () => {
       if (!repos || repos.length === 0) {
+        console.log('No repos available for fetching commits');
         return { commits: [], userStats: {} };
       }
       
+      console.log('Filtering repos:', selectedRepos);
       const filteredRepos = repos.filter(repo => 
         selectedRepos.length === 0 || selectedRepos.includes(repo.name)
       );
       
+      console.log('Fetching commits for repos:', filteredRepos.map(r => r.name));
+      
       setCacheStatus({
         type: 'commits',
-        org: selectedOrg,
+        org: selectedOrg.trim(),
         timestamp: new Date(),
         count: 0,
         source: 'Fetching...'
@@ -201,6 +215,7 @@ function App() {
             userStats[author].repositories[repo.name] = {
               commits: 0,
               branches: [],
+              commitDates: []
             };
           }
           
@@ -218,8 +233,20 @@ function App() {
               ]),
             ];
           }
+
+          if (commit.date) {
+            const dateStats = userStats[author].repositories[repo.name].commitDates;
+            const existingDate = dateStats.find(d => d.date === commit.date);
+            if (existingDate) {
+              existingDate.count++;
+            } else {
+              dateStats.push({ date: commit.date, count: 1 });
+            }
+          }
         });
       }
+      
+      console.log('Finished processing commits:', allCommits.length);
       
       const employeeIds = Object.keys(userStats);
       const names = await fetchEmployeeNames(employeeIds);
@@ -239,11 +266,13 @@ function App() {
       retryDelay: 1000,
       onSuccess: () => {
         setIsAnalyzing(false);
+        setIsCaching(false);
         setError(null);
       },
       onError: (error) => {
         console.error('Error fetching commits:', error);
         setIsAnalyzing(false);
+        setIsCaching(false);
         setError('Failed to fetch commit data. Please try again.');
       },
     }
@@ -251,252 +280,130 @@ function App() {
 
   useEffect(() => {
     if (shouldFetchRepos && selectedOrg) {
+      console.log('Triggering repo fetch for org:', selectedOrg);
       refetchRepos();
       setShouldFetchRepos(false);
     }
   }, [shouldFetchRepos, selectedOrg, refetchRepos]);
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (validateAdmin(adminEmail, adminPassword)) {
-      setIsAdmin(true);
-      setShowLoginModal(false);
-      setToast({
-        open: true,
-        title: 'Login Successful',
-        description: 'You now have admin access to analyze repositories.'
-      });
-    } else {
-      setToast({
-        open: true,
-        title: 'Login Failed',
-        description: 'Invalid email or password.'
-      });
-    }
-  };
-
-  const handleLogout = () => {
-    setIsAdmin(false);
-    setAdminEmail('');
-    setAdminPassword('');
-    setToast({
-      open: true,
-      title: 'Logged Out',
-      description: 'You have been logged out successfully.'
-    });
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!org || isLoading) return;
+    if (!org || isLoading || !isWithinAllowedHours()) return;
 
-    if (!isAdmin) {
-      setShowLoginModal(true);
+    const trimmedOrg = org.trim();
+    if (!trimmedOrg) {
+      setError('Organization name cannot be empty');
       return;
     }
 
+    console.log('Starting analysis for org:', trimmedOrg);
     setIsAnalyzing(true);
-    setSelectedOrg(org);
+    setSelectedOrg(trimmedOrg);
     setShouldFetchRepos(true);
   };
 
-  const handleCache = async () => {
-    if (!selectedOrg || !repoData || isCaching) return;
+  const handleCacheData = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!org || isLoading || !isWithinAllowedHours()) return;
 
+    const trimmedOrg = org.trim();
+    if (!trimmedOrg) {
+      setError('Organization name cannot be empty');
+      return;
+    }
+
+    console.log('Starting cache process for org:', trimmedOrg);
     setIsCaching(true);
-    try {
-      const response = await axios.post(`http://localhost:3001/api/cache/org/${selectedOrg}`, {
-        repositories: repos,
-        commits: repoData.commits.reduce((acc, commit) => {
-          const repoName = commit.url.split('/')[5];
-          if (!acc[repoName]) acc[repoName] = [];
-          acc[repoName].push(commit);
-          return acc;
-        }, {}),
-        branches: {}
-      });
 
-      const status = response.data as CacheOperationStatus;
-      setToast({
-        open: true,
-        title: 'Cache Updated',
-        description: `Successfully cached data for ${selectedOrg} at ${format(parseISO(status.timestamp), 'PPpp')}`
+    try {
+      await cacheOrgData(trimmedOrg, token);
+      setError(null);
+      setCacheStatus({
+        type: 'commits',
+        org: trimmedOrg,
+        timestamp: new Date(),
+        count: 0,
+        source: 'Cache Updated'
       });
     } catch (error) {
-      setToast({
-        open: true,
-        title: 'Cache Error',
-        description: 'Failed to cache organization data. Please try again.'
-      });
+      console.error('Error caching data:', error);
+      setError('Failed to cache organization data. Please try again.');
     } finally {
       setIsCaching(false);
     }
   };
 
-  const isLoading = isLoadingRepos || isLoadingCommits || isAnalyzing;
+  const isLoading = isLoadingRepos || isLoadingCommits || isAnalyzing || isCaching;
   const errorMessage = error || (commitsError ? 'Failed to fetch commit data. Please try again.' : null);
 
   return (
-    <Toast.Provider swipeDirection="right">
-      <div className="min-h-screen bg-gray-100 py-8 px-4">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex items-center justify-between mb-8">
-            <div className="flex items-center gap-3">
-              <Github className="w-10 h-10 text-indigo-600 animate-pulse" />
-              <h1 className="text-3xl font-bold text-gray-900">
-                GitHub Organization Commit Analyzer
-              </h1>
-            </div>
+    <div className="min-h-screen bg-gray-100 py-8 px-4">
+      <div className="max-w-7xl mx-auto relative">
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center gap-3">
+            <Github className="w-10 h-10 text-indigo-600 animate-pulse" />
+            <h1 className="text-3xl font-bold text-gray-900">
+              GitHub Organization Commit Analyzer
+            </h1>
+          </div>
+          {repoData?.commits && repoData.commits.length > 0 && (
             <div className="flex items-center gap-4">
-              {isAdmin ? (
-                <button
-                  onClick={handleLogout}
-                  className="flex items-center gap-2 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors duration-200"
-                >
-                  <LogOut className="w-5 h-5" />
-                  Logout
-                </button>
-              ) : (
-                <button
-                  onClick={() => setShowLoginModal(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors duration-200"
-                >
-                  <LogIn className="w-5 h-5" />
-                  Admin Login
-                </button>
-              )}
-              {repoData?.commits && repoData.commits.length > 0 && (
-                <>
-                  <button
-                    onClick={handleCache}
-                    disabled={isCaching}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors duration-200 ${
-                      isCaching
-                        ? 'bg-gray-400 cursor-not-allowed'
-                        : 'bg-green-600 hover:bg-green-700'
-                    } text-white`}
-                  >
-                    {isCaching ? (
-                      <>
-                        <Loader2 className="w-5 h-5 animate-spin" />
-                        Caching...
-                      </>
-                    ) : (
-                      <>
-                        <Save className="w-5 h-5" />
-                        Cache Data
-                      </>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setView('dashboard')}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors duration-200 ${
-                      view === 'dashboard'
-                        ? 'bg-indigo-600 text-white'
-                        : 'bg-white text-gray-700 hover:bg-gray-50'
-                    }`}
-                  >
-                    <BarChart2 className="w-5 h-5" />
-                    Dashboard
-                  </button>
-                  <button
-                    onClick={() => setView('hierarchy')}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors duration-200 ${
-                      view === 'hierarchy'
-                        ? 'bg-indigo-600 text-white'
-                        : 'bg-white text-gray-700 hover:bg-gray-50'
-                    }`}
-                  >
-                    <LayoutList className="w-5 h-5" />
-                    Pod Hierarchy
-                  </button>
-                </>
-              )}
+              <button
+                onClick={() => setView('dashboard')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors duration-200 ${
+                  view === 'dashboard'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-white text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <BarChart2 className="w-5 h-5" />
+                Dashboard
+              </button>
+              <button
+                onClick={() => setView('hierarchy')}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors duration-200 ${
+                  view === 'hierarchy'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-white text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                <LayoutList className="w-5 h-5" />
+                Pod Hierarchy
+              </button>
+            </div>
+          )}
+        </div>
+
+        <AdminLogin />
+
+        {timeRestrictionMessage && (
+          <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 p-4 rounded-lg mb-6 flex items-center gap-2">
+            <Clock className="w-5 h-5" />
+            <p>{timeRestrictionMessage}</p>
+          </div>
+        )}
+
+        {errorMessage && (
+          <div className="error">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-5 h-5" />
+              <p>{errorMessage}</p>
             </div>
           </div>
+        )}
 
-          {errorMessage && (
-            <div className="error">
-              <div className="flex items-center gap-2">
-                <AlertCircle className="w-5 h-5" />
-                <p>{errorMessage}</p>
-              </div>
-            </div>
-          )}
+        {cacheStatus && (
+          <div className="bg-blue-50 border border-blue-200 text-blue-700 p-4 rounded-lg mb-6">
+            <p>
+              <span className="font-semibold">
+                {cacheStatus.type === 'repositories' ? 'Repositories' : 'Commits'} data for {cacheStatus.org}:
+              </span>
+              {' '}{cacheStatus.count} items {cacheStatus.source !== 'Unknown' && `(${cacheStatus.source})`}
+            </p>
+          </div>
+        )}
 
-          {showLoginModal && (
-            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-              <div className="bg-white rounded-lg p-6 w-96">
-                <div className="flex items-center gap-2 mb-4">
-                  <Lock className="w-5 h-5 text-indigo-600" />
-                  <h2 className="text-xl font-semibold">Admin Login</h2>
-                </div>
-                <form onSubmit={handleLogin} className="space-y-4">
-                  <div>
-                    <label htmlFor="adminEmail" className="block text-sm font-medium text-gray-700 mb-1">
-                      Email
-                    </label>
-                    <input
-                      type="email"
-                      id="adminEmail"
-                      value={adminEmail}
-                      onChange={(e) => setAdminEmail(e.target.value)}
-                      className="input-field"
-                      required
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="adminPassword" className="block text-sm font-medium text-gray-700 mb-1">
-                      Password
-                    </label>
-                    <input
-                      type="password"
-                      id="adminPassword"
-                      value={adminPassword}
-                      onChange={(e) => setAdminPassword(e.target.value)}
-                      className="input-field"
-                      required
-                    />
-                  </div>
-                  <div className="flex gap-2 justify-end">
-                    <button
-                      type="button"
-                      onClick={() => setShowLoginModal(false)}
-                      className="px-4 py-2 text-gray-600 hover:text-gray-800"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
-                    >
-                      Login
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
-
-          {cacheStatus && (
-            <div className="bg-blue-50 border border-blue-200 text-blue-700 p-4 rounded-lg mb-6">
-              <div className="flex items-center gap-2">
-                <Database className="w-5 h-5" />
-                <p>
-                  <span className="font-semibold">
-                    {cacheStatus.type === 'repositories' ? 'Repositories' : 'Commits'} data for {cacheStatus.org}:
-                  </span>
-                  {' '}{cacheStatus.count} items
-                  {cacheStatus.source !== 'Unknown' && (
-                    <span className="ml-2">
-                      ({cacheStatus.source} at {format(cacheStatus.timestamp, 'PPpp')})
-                    </span>
-                  )}
-                </p>
-              </div>
-            </div>
-          )}
-
+        {isAdmin && (
           <form onSubmit={handleSubmit} className="mb-8 space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -586,79 +493,85 @@ function App() {
               )}
             </div>
 
-            <button
-              type="submit"
-              disabled={!org || isLoading}
-              className="submit-button"
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                  Analyzing...
-                </>
-              ) : isAdmin ? (
-                'Analyze'
-              ) : (
-                <>
-                  <Lock className="w-5 h-5 mr-2" />
-                  Login to Analyze
-                </>
-              )}
-            </button>
-          </form>
+            <div className="flex gap-4">
+              <button
+                type="submit"
+                disabled={!org || isLoading || !isWithinAllowedHours()}
+                className="submit-button flex-1"
+                title={timeRestrictionMessage || ''}
+              >
+                {isAnalyzing ? (
+                  <>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    Analyzing...
+                  </>
+                ) : (
+                  'Analyze'
+                )}
+              </button>
 
-          {isLoading && (
-            <div className="loading">
-              <div className="flex flex-col items-center gap-4">
-                <div className="relative">
-                  <div className="w-16 h-16 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
-                  <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-                    <Github className="w-8 h-8 text-indigo-600" />
-                  </div>
-                </div>
-                <p className="text-lg font-medium text-gray-700">
-                  Fetching commit data from all branches...
-                </p>
-                <div className="w-48 h-2 bg-gray-200 rounded-full overflow-hidden">
-                  <div className="h-full bg-indigo-600 animate-pulse"></div>
+              <button
+                type="button"
+                onClick={handleCacheData}
+                disabled={!org || isLoading || !isWithinAllowedHours()}
+                className="submit-button flex-1 bg-green-600 hover:bg-green-700 focus:ring-green-500"
+                title={timeRestrictionMessage || ''}
+              >
+                {isCaching ? (
+                  <>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    Caching Data...
+                  </>
+                ) : (
+                  <>
+                    <Database className="w-5 h-5 mr-2" />
+                    Cache 4 Months Data
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {isLoading && (
+          <div className="loading">
+            <div className="flex flex-col items-center gap-4">
+              <div className="relative">
+                <div className="w-16 h-16 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+                  <Github className="w-8 h-8 text-indigo-600" />
                 </div>
               </div>
+              <p className="text-lg font-medium text-gray-700">
+                {isCaching ? 'Caching last 4 months of commit data...' : 'Fetching commit data from all branches...'}
+              </p>
+              <div className="w-48 h-2 bg-gray-200 rounded-full overflow-hidden">
+                <div className="h-full bg-indigo-600 animate-pulse"></div>
+              </div>
             </div>
-          )}
+          </div>
+        )}
 
-          {repoData?.commits && repoData.commits.length > 0 && (
-            view === 'dashboard' ? (
-              <Dashboard
-                commits={repoData.commits}
-                dateRange={dateRange}
-                userStats={repoData.userStats}
-                employeeNames={employeeNames}
-              />
-            ) : (
-              <PodHierarchy userStats={repoData.userStats} />
-            )
-          )}
+        {repoData?.commits && repoData.commits.length > 0 && (
+          view === 'dashboard' ? (
+            <Dashboard
+              commits={repoData.commits}
+              dateRange={dateRange}
+              userStats={repoData.userStats}
+              employeeNames={employeeNames}
+            />
+          ) : (
+            <PodHierarchy userStats={repoData.userStats} />
+          )
+        )}
 
-          {selectedOrg && !isLoading && (!repoData?.commits || repoData.commits.length === 0) && (
-            <div className="text-center py-8 text-gray-600">
-              <p>No commits found for organization: {selectedOrg}</p>
-            </div>
-          )}
-        </div>
+        {selectedOrg && !isLoading && (!repoData?.commits || repoData.commits.length === 0) && (
+          <div className="text-center py-8 text-gray-600">
+            <p>No commits found for organization: {selectedOrg}</p>
+          </div>
+        )}
       </div>
-
-      <Toast.Root
-        open={toast.open}
-        onOpenChange={(open) => setToast(prev => ({ ...prev, open }))}
-        className="fixed bottom-4 right-4 bg-white rounded-lg shadow-lg p-4 w-96"
-      >
-        <Toast.Title className="text-lg font-semibold">{toast.title}</Toast.Title>
-        <Toast.Description className="mt-1 text-gray-600">
-          {toast.description}
-        </Toast.Description>
-      </Toast.Root>
-      <Toast.Viewport />
-    </Toast.Provider>
+    </div>
   );
 }
 
