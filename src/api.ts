@@ -11,7 +11,6 @@ const github = axios.create({
   params: {
     per_page: 100,
   },
-  timeout: 30000,
   validateStatus: (status) => {
     return status >= 200 && status < 600;
   },
@@ -22,7 +21,6 @@ const checkCacheServer = async () => {
   try {
     console.log('Checking cache server status...');
     const response = await axios.get(`${API_URL}/health`, {
-      timeout: 5000,
       validateStatus: (status) => status === 200,
     });
     console.log('Cache server status:', response.data);
@@ -166,30 +164,6 @@ const fetchAllPages = async <T>(
   return allData;
 };
 
-// Get the last cached commit date for an organization
-const getLastCachedCommitDate = async (org: string): Promise<Date | null> => {
-  try {
-    const response = await axios.get(`${API_URL}/cache/last-commit-date/${org}`);
-    return response.data.lastCommitDate ? new Date(response.data.lastCommitDate) : null;
-  } catch (error) {
-    console.log('No cached commit date found');
-    return null;
-  }
-};
-
-// Clean up old commits (older than 4 months)
-const cleanupOldCommits = async (org: string) => {
-  try {
-    const fourMonthsAgo = subMonths(new Date(), 4);
-    await axios.post(`${API_URL}/cache/cleanup/${org}`, {
-      olderThan: fourMonthsAgo.toISOString()
-    });
-    console.log('Cleaned up old commits');
-  } catch (error) {
-    console.error('Error cleaning up old commits:', error);
-  }
-};
-
 export const fetchEmployeeNames = async (employeeIds: string[]): Promise<Record<string, Employee>> => {
   const employees: Record<string, Employee> = {};
   const batchSize = 10;
@@ -203,7 +177,6 @@ export const fetchEmployeeNames = async (employeeIds: string[]): Promise<Record<
     const promises = batch.map(async id => {
       try {
         const response = await axios.get(`${API_URL}/employees/${id}`, {
-          timeout: 5000,
           validateStatus: (status) => status === 200,
         });
         return {
@@ -244,7 +217,6 @@ export const fetchPodEmployees = async (podIds: string[]): Promise<PodEmployee[]
   for (const podId of podIds) {
     try {
       const response = await axios.get(`${API_URL}/pods/${podId}/employees`, {
-        timeout: 5000,
         validateStatus: (status) => status === 200,
       });
       employees.push(...response.data);
@@ -264,7 +236,7 @@ export const fetchOrgRepos = async (org: string, token?: string): Promise<Reposi
   if (isCacheAvailable) {
     try {
       console.log('Checking cache for repositories');
-      const cacheResponse = await axios.get(`${API_URL}/cache/repositories/${org}`);
+      const cacheResponse = await axios.get(`${API_URL}/cache/repositories`);
       if (cacheResponse.data && cacheResponse.data.length > 0) {
         console.log('Using cached repositories');
         return cacheResponse.data;
@@ -288,7 +260,7 @@ export const fetchOrgRepos = async (org: string, token?: string): Promise<Reposi
     if (repos.length > 0 && isCacheAvailable) {
       try {
         console.log('Caching repositories');
-        await axios.post(`${API_URL}/cache/repositories/${org}`, { data: repos });
+        await axios.post(`${API_URL}/cache/repositories`, { data: repos });
         console.log('Cached repositories successfully');
       } catch (error) {
         console.warn('Failed to cache repositories:', error);
@@ -412,7 +384,10 @@ export const fetchBranchCommits = async (
     if (filteredCommits.length > 0 && isCacheAvailable) {
       try {
         console.log('Caching commits');
-        await axios.post(`${API_URL}/cache/commits/${encodeURIComponent(cacheKey)}`, { data: filteredCommits });
+        await axios.post(`${API_URL}/cache/commits`, { 
+          repository: fullName,
+          commits: filteredCommits
+        });
         console.log('Cached commits successfully');
       } catch (error) {
         console.warn('Failed to cache commits:', error);
@@ -465,9 +440,8 @@ export const cacheOrgData = async (
   org: string,
   token?: string
 ): Promise<void> => {
-  const lastCachedDate = await getLastCachedCommitDate(org);
   const endDate = new Date();
-  const startDate = lastCachedDate || subMonths(endDate, 4);
+  const startDate = subMonths(endDate, 4);
 
   console.log('Caching data from', startDate, 'to', endDate);
 
@@ -478,9 +452,6 @@ export const cacheOrgData = async (
       const { commits } = await fetchAllRepoCommits(repo, token, startDate, endDate);
       console.log(`Cached ${commits.length} commits for ${repo.full_name}`);
     }
-
-    // Clean up old commits
-    await cleanupOldCommits(org);
   } catch (error) {
     console.error('Error caching organization data:', error);
     throw error;

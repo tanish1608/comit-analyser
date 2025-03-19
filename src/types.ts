@@ -94,6 +94,8 @@ export interface AuthContextType {
   isAdmin: boolean;
   login: (credentials: AdminCredentials) => Promise<void>;
   logout: () => void;
+  showLoginModal: boolean;
+  setShowLoginModal: (show: boolean) => void;
 }
 
 export interface AuthProviderProps {
