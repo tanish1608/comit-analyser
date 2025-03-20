@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { format } from 'date-fns';
+import { format, parseISO, isWithinInterval, startOfDay, endOfDay } from 'date-fns';
 import { Commit, UserStats, Employee } from '../types';
-import { Users, GitCommit, GitBranch, GitFork, FileDown, ChevronDown, ChevronUp, BarChart2 } from 'lucide-react';
+import { Users, GitCommit, GitBranch, GitFork, FileDown, ChevronDown, ChevronUp, BarChart2, Calendar } from 'lucide-react';
 import { utils, writeFile } from 'xlsx';
 import { Analytics } from './Analytics';
+import { DateRangePicker } from 'rsuite';
 
 interface DashboardProps {
   commits: Commit[];
@@ -15,27 +16,45 @@ interface DashboardProps {
 export const Dashboard: React.FC<DashboardProps> = ({ commits, dateRange, userStats, employeeNames }) => {
   const [expandedUsers, setExpandedUsers] = useState<Set<string>>(new Set(Object.keys(userStats)));
   const [showAnalytics, setShowAnalytics] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [selectedDateRange, setSelectedDateRange] = useState<[Date, Date]>(dateRange);
   const [filteredCommits, setFilteredCommits] = useState<Commit[]>(commits);
 
-  useEffect(() => {
-    if (selectedDate) {
-      const filtered = commits.filter(commit => commit.date === selectedDate);
-      setFilteredCommits(filtered);
-    } else {
-      setFilteredCommits(commits);
-    }
-  }, [selectedDate, commits]);
-
-  const commitDates = useMemo(() => {
-    const dates = new Set<string>();
-    commits.forEach(commit => {
-      if (commit.date) {
-        dates.add(commit.date);
-      }
-    });
-    return Array.from(dates).sort();
+  // Calculate available date range from commits
+  const availableDateRange = useMemo(() => {
+    if (commits.length === 0) return dateRange;
+    
+    const dates = commits.map(commit => new Date(commit.commit.author.date));
+    return [
+      new Date(Math.min(...dates.map(d => d.getTime()))),
+      new Date(Math.max(...dates.map(d => d.getTime())))
+    ] as [Date, Date];
   }, [commits]);
+
+  // Calculate daily commit counts
+  const dailyCommits = useMemo(() => {
+    const commitsByDay = new Map<string, number>();
+    
+    filteredCommits.forEach(commit => {
+      const date = format(new Date(commit.commit.author.date), 'yyyy-MM-dd');
+      commitsByDay.set(date, (commitsByDay.get(date) || 0) + 1);
+    });
+    
+    return Array.from(commitsByDay.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, count]) => ({ date, count }));
+  }, [filteredCommits]);
+
+  // Update filtered commits when date range changes
+  useEffect(() => {
+    const filtered = commits.filter(commit => {
+      const commitDate = new Date(commit.commit.author.date);
+      return isWithinInterval(commitDate, {
+        start: startOfDay(selectedDateRange[0]),
+        end: endOfDay(selectedDateRange[1])
+      });
+    });
+    setFilteredCommits(filtered);
+  }, [selectedDateRange, commits]);
 
   const toggleUser = (authorId: string) => {
     setExpandedUsers(prev => {
@@ -52,6 +71,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ commits, dateRange, userSt
   const handleExportToExcel = () => {
     const wb = utils.book_new();
     
+    // Summary sheet
     const summaryData = Object.entries(userStats).map(([authorId, stats]) => ({
       'Author ID': authorId,
       'Author Name': employeeNames[authorId]?.name || authorId,
@@ -63,6 +83,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ commits, dateRange, userSt
     const summaryWs = utils.json_to_sheet(summaryData);
     utils.book_append_sheet(wb, summaryWs, 'Summary');
     
+    // Daily commits sheet
+    const dailyData = dailyCommits.map(({ date, count }) => ({
+      'Date': date,
+      'Commits': count
+    }));
+    
+    const dailyWs = utils.json_to_sheet(dailyData);
+    utils.book_append_sheet(wb, dailyWs, 'Daily Commits');
+    
+    // Detailed sheet
     const detailedData = Object.entries(userStats).flatMap(([authorId, stats]) =>
       Object.entries(stats.repositories).map(([repo, repoStats]) => ({
         'Author ID': authorId,
@@ -77,7 +107,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ commits, dateRange, userSt
     const detailedWs = utils.json_to_sheet(detailedData);
     utils.book_append_sheet(wb, detailedWs, 'Detailed');
     
-    const commitsData = commits.map(commit => ({
+    // Commits sheet
+    const commitsData = filteredCommits.map(commit => ({
       'SHA': commit.sha.substring(0, 7),
       'Author ID': commit.author?.login || commit.commit.author.name,
       'Author Name': employeeNames[commit.author?.login || '']?.name || commit.commit.author.name,
@@ -89,8 +120,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ commits, dateRange, userSt
     const commitsWs = utils.json_to_sheet(commitsData);
     utils.book_append_sheet(wb, commitsWs, 'Commits');
     
-    const startDate = format(dateRange[0], 'yyyyMMdd');
-    const endDate = format(dateRange[1], 'yyyyMMdd');
+    const startDate = format(selectedDateRange[0], 'yyyyMMdd');
+    const endDate = format(selectedDateRange[1], 'yyyyMMdd');
     writeFile(wb, `github-commits-${startDate}-${endDate}.xlsx`);
   };
 
@@ -111,16 +142,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ commits, dateRange, userSt
           </button>
         </div>
         <div className="flex items-center gap-4">
-          <select
-            value={selectedDate || ''}
-            onChange={(e) => setSelectedDate(e.target.value || null)}
-            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-          >
-            <option value="">All dates</option>
-            {commitDates.map(date => (
-              <option key={date} value={date}>{date}</option>
-            ))}
-          </select>
+          <div className="relative">
+            <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 z-10" />
+            <DateRangePicker
+              value={selectedDateRange}
+              onChange={value => setSelectedDateRange(value as [Date, Date])}
+              className="w-[300px]"
+              character=" - "
+              format="yyyy-MM-dd"
+              cleanable={false}
+              placement="bottomEnd"
+              disabledDate={date => 
+                date < availableDateRange[0] || 
+                date > availableDateRange[1]
+              }
+            />
+          </div>
           <button 
             onClick={handleExportToExcel}
             className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors duration-200"
@@ -134,7 +171,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ commits, dateRange, userSt
       {showAnalytics ? (
         <Analytics
           commits={filteredCommits}
-          dateRange={dateRange}
+          dateRange={selectedDateRange}
           userStats={userStats}
         />
       ) : (
@@ -154,11 +191,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ commits, dateRange, userSt
                 <h3>Total Commits</h3>
               </div>
               <p className="stat-number">{filteredCommits.length}</p>
-              {selectedDate && (
-                <p className="text-sm text-gray-600 mt-1">
-                  Showing commits for {selectedDate}
-                </p>
-              )}
+              <p className="text-sm text-gray-600 mt-1">
+                {format(selectedDateRange[0], 'MMM dd, yyyy')} - {format(selectedDateRange[1], 'MMM dd, yyyy')}
+              </p>
             </div>
 
             <div className="stat-card transform hover:scale-105 transition-transform duration-200">
@@ -174,13 +209,48 @@ export const Dashboard: React.FC<DashboardProps> = ({ commits, dateRange, userSt
             </div>
           </div>
 
+          <div className="bg-white rounded-lg shadow-lg p-6">
+            <h3 className="text-lg font-semibold mb-4">Daily Commit Activity</h3>
+            <div className="overflow-x-auto">
+              <table className="min-w-full">
+                <thead>
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Date
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Commits
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {dailyCommits.map(({ date, count }) => (
+                    <tr key={date} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {format(parseISO(date), 'MMM dd, yyyy')}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <span className="text-sm font-medium text-gray-900 mr-2">{count}</span>
+                          <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-indigo-600 rounded-full"
+                              style={{ 
+                                width: `${(count / Math.max(...dailyCommits.map(d => d.count))) * 100}%` 
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           <div className="space-y-6">
-            <h3 className="text-xl font-semibold text-gray-900">
-              Contributor Statistics
-              <span className="ml-2 text-sm font-normal text-gray-600">
-                {format(dateRange[0], 'MMM dd, yyyy')} - {format(dateRange[1], 'MMM dd, yyyy')}
-              </span>
-            </h3>
+            <h3 className="text-xl font-semibold text-gray-900">Contributor Statistics</h3>
             {sortedUsers.map(([authorId, stats]) => {
               const employee = employeeNames[authorId];
               const isExpanded = expandedUsers.has(authorId);
