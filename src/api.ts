@@ -230,22 +230,7 @@ export const fetchPodEmployees = async (podIds: string[]): Promise<PodEmployee[]
 
 export const fetchOrgRepos = async (org: string, token?: string): Promise<Repository[]> => {
   console.log(`Fetching repositories for organization: ${org}`);
-  const isCacheAvailable = await checkCacheServer();
-  console.log('Cache server available:', isCacheAvailable);
-
-  if (isCacheAvailable) {
-    try {
-      console.log('Checking cache for repositories');
-      const cacheResponse = await axios.get(`${API_URL}/cache/repositories`);
-      if (cacheResponse.data && cacheResponse.data.length > 0) {
-        console.log('Using cached repositories');
-        return cacheResponse.data;
-      }
-    } catch (error) {
-      console.log('Cache miss for repositories');
-    }
-  }
-
+  
   try {
     console.log('Fetching repositories from GitHub API');
     const repos = await fetchAllPages<Repository>(
@@ -256,17 +241,6 @@ export const fetchOrgRepos = async (org: string, token?: string): Promise<Reposi
     );
     
     console.log(`Found ${repos.length} repositories`);
-    
-    if (repos.length > 0 && isCacheAvailable) {
-      try {
-        console.log('Caching repositories');
-        await axios.post(`${API_URL}/cache/repositories`, { data: repos });
-        console.log('Cached repositories successfully');
-      } catch (error) {
-        console.warn('Failed to cache repositories:', error);
-      }
-    }
-    
     return repos;
   } catch (error) {
     return handleApiError(error, `repositories for ${org}`);
@@ -275,22 +249,7 @@ export const fetchOrgRepos = async (org: string, token?: string): Promise<Reposi
 
 export const fetchRepoBranches = async (fullName: string, token?: string): Promise<Branch[]> => {
   console.log(`Fetching branches for repository: ${fullName}`);
-  const isCacheAvailable = await checkCacheServer();
-  console.log('Cache server available:', isCacheAvailable);
-
-  if (isCacheAvailable) {
-    try {
-      console.log('Checking cache for branches');
-      const cacheResponse = await axios.get(`${API_URL}/cache/branches/${fullName}`);
-      if (cacheResponse.data && cacheResponse.data.length > 0) {
-        console.log('Using cached branches');
-        return cacheResponse.data;
-      }
-    } catch (error) {
-      console.log('Cache miss for branches');
-    }
-  }
-
+  
   try {
     console.log('Fetching branches from GitHub API');
     const branches = await fetchAllPages<Branch>(
@@ -301,17 +260,6 @@ export const fetchRepoBranches = async (fullName: string, token?: string): Promi
     );
     
     console.log(`Found ${branches.length} branches`);
-    
-    if (branches.length > 0 && isCacheAvailable) {
-      try {
-        console.log('Caching branches');
-        await axios.post(`${API_URL}/cache/branches/${fullName}`, { data: branches });
-        console.log('Cached branches successfully');
-      } catch (error) {
-        console.warn('Failed to cache branches:', error);
-      }
-    }
-    
     return branches;
   } catch (error) {
     return handleApiError(error, `branches for ${fullName}`);
@@ -336,23 +284,6 @@ export const fetchBranchCommits = async (
   
   if (until) {
     params.until = until.toISOString();
-  }
-
-  const cacheKey = `${fullName}/${branch.name}/${since?.toISOString() || 'none'}/${until?.toISOString() || 'none'}`;
-  const isCacheAvailable = await checkCacheServer();
-  console.log('Cache server available:', isCacheAvailable);
-  
-  if (isCacheAvailable) {
-    try {
-      console.log('Checking cache for commits');
-      const cacheResponse = await axios.get(`${API_URL}/cache/commits/${encodeURIComponent(cacheKey)}`);
-      if (cacheResponse.data && cacheResponse.data.length > 0) {
-        console.log('Using cached commits');
-        return cacheResponse.data;
-      }
-    } catch (error) {
-      console.log('Cache miss for commits');
-    }
   }
 
   try {
@@ -380,20 +311,6 @@ export const fetchBranchCommits = async (
       }));
     
     console.log(`Filtered to ${filteredCommits.length} commits`);
-    
-    if (filteredCommits.length > 0 && isCacheAvailable) {
-      try {
-        console.log('Caching commits');
-        await axios.post(`${API_URL}/cache/commits`, { 
-          repository: fullName,
-          commits: filteredCommits
-        });
-        console.log('Cached commits successfully');
-      } catch (error) {
-        console.warn('Failed to cache commits:', error);
-      }
-    }
-    
     return filteredCommits;
   } catch (error) {
     return handleApiError(error, `commits for ${fullName}/${branch.name}`);
@@ -446,12 +363,40 @@ export const cacheOrgData = async (
   console.log('Caching data from', startDate, 'to', endDate);
 
   try {
+    // First, fetch and cache repositories
     const repos = await fetchOrgRepos(org, token);
+    console.log(`Caching data for ${repos.length} repositories`);
     
+    // Cache repositories
+    await axios.post(`${API_URL}/cache/repositories`, {
+      org,
+      data: repos
+    });
+    
+    // Then fetch and cache commits for each repository
     for (const repo of repos) {
-      const { commits } = await fetchAllRepoCommits(repo, token, startDate, endDate);
-      console.log(`Cached ${commits.length} commits for ${repo.full_name}`);
+      console.log(`Processing repository: ${repo.full_name}`);
+      const { commits, branches } = await fetchAllRepoCommits(repo, token, startDate, endDate);
+      
+      // Cache commits
+      if (commits.length > 0) {
+        try {
+          await axios.post(`${API_URL}/cache/commits`, {
+            repository: repo.full_name,
+            commits,
+            dateRange: {
+              since: startDate.toISOString(),
+              until: endDate.toISOString()
+            }
+          });
+          console.log(`Cached ${commits.length} commits for ${repo.full_name}`);
+        } catch (error) {
+          console.error(`Failed to cache commits for ${repo.full_name}:`, error);
+        }
+      }
     }
+    
+    console.log('Finished caching organization data');
   } catch (error) {
     console.error('Error caching organization data:', error);
     throw error;

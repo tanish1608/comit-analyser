@@ -6,9 +6,19 @@ import { PodHierarchy } from './PodHierarchy';
 import { AdminLogin } from '../components/AdminLogin';
 import { useAuth } from '../contexts/AuthContext';
 import { Database, Loader2, AlertCircle, BarChart2, LayoutList } from 'lucide-react';
-import { UserStats, CacheStatus, Employee } from '../types';
+import { UserStats, CacheStatus, Employee, Repository } from '../types';
 import { subMonths } from 'date-fns';
 import 'rsuite/dist/rsuite.min.css';
+
+interface CachedData {
+  repositories: Record<string, Repository[]>;
+  commits: Record<string, any[]>;
+  stats: {
+    totalRepos: number;
+    totalCommits: number;
+    organizations: string[];
+  };
+}
 
 export function CachedAnalyzer() {
   const { isAdmin } = useAuth();
@@ -28,70 +38,64 @@ export function CachedAnalyzer() {
     'cached-data',
     async () => {
       try {
-        // Get cache stats to find all repositories
-        const statsResponse = await axios.get('http://localhost:3001/api/cache/stats');
-        const cacheData = statsResponse.data;
+        // Get all cached data in a single call
+        const response = await axios.get<CachedData>('http://localhost:3001/api/cache/all-data', {
+          params: {
+            startDate: startDate.toISOString(),
+            endDate: endDate.toISOString()
+          }
+        });
         
-        if (!cacheData.repositories || Object.keys(cacheData.repositories).length === 0) {
+
+        const { repositories, commits } = response.data;
+        console.log("Sdfsdfsdfsdsf", repositories, commits)
+        if (!repositories || Object.keys(repositories).length === 0) {
           throw new Error('No cached data found');
         }
 
-        // Get all repositories from cache
-        const allRepos = Object.keys(cacheData.repositories).map(key => {
-          const [org, repo] = key.split('/');
-          return { org, repo };
+        const allCommits: any[] = [];
+        const userStats: Record<string, UserStats> = {};
+
+        // Process all commits
+        Object.entries(commits).forEach(([repoFullName, repoCommits]) => {
+          const [org, repoName] = repoFullName.split('/');
+          
+          repoCommits.forEach(commit => {
+            allCommits.push(commit);
+            
+            const author = commit.author?.login || commit.commit.author.name;
+            
+            if (!userStats[author]) {
+              userStats[author] = {
+                totalCommits: 0,
+                repositories: {},
+              };
+            }
+            
+            userStats[author].totalCommits++;
+            
+            if (!userStats[author].repositories[repoName]) {
+              userStats[author].repositories[repoName] = {
+                commits: 0,
+                branches: [],
+                commitDates: []
+              };
+            }
+            
+            userStats[author].repositories[repoName].commits++;
+            
+            if (commit.date) {
+              const dateStats = userStats[author].repositories[repoName].commitDates;
+              const existingDate = dateStats.find(d => d.date === commit.date);
+              if (existingDate) {
+                existingDate.count++;
+              } else {
+                dateStats.push({ date: commit.date, count: 1 });
+              }
+            }
+          });
         });
 
-        const allCommits = [];
-        const userStats: Record<string, UserStats> = {};
-        
-        // Fetch commits for each repository
-        for (const { org, repo } of allRepos) {
-          try {
-            const response = await axios.get(
-              `http://localhost:3001/api/cache/commits/${org}/${repo}/${startDate.toISOString()}/${endDate.toISOString()}`
-            );
-            
-            const commits = response.data;
-            allCommits.push(...commits);
-            
-            commits.forEach(commit => {
-              const author = commit.author?.login || commit.commit.author.name;
-              
-              if (!userStats[author]) {
-                userStats[author] = {
-                  totalCommits: 0,
-                  repositories: {},
-                };
-              }
-              
-              userStats[author].totalCommits++;
-              
-              if (!userStats[author].repositories[repo]) {
-                userStats[author].repositories[repo] = {
-                  commits: 0,
-                  branches: [],
-                  commitDates: []
-                };
-              }
-              
-              userStats[author].repositories[repo].commits++;
-              
-              if (commit.date) {
-                const dateStats = userStats[author].repositories[repo].commitDates;
-                const existingDate = dateStats.find(d => d.date === commit.date);
-                if (existingDate) {
-                  existingDate.count++;
-                } else {
-                  dateStats.push({ date: commit.date, count: 1 });
-                }
-              }
-            });
-          } catch (error) {
-            console.error(`Error fetching cached commits for ${repo}:`, error);
-          }
-        }
-        
         // Fetch employee names
         const employeeIds = Object.keys(userStats);
         const employeeResponses = await Promise.all(

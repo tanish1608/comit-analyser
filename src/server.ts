@@ -9,7 +9,7 @@ const app = express();
 const PORT = 3001;
 
 // Create a .cache directory in the project root
-const CACHE_DIR = path.join(process.cwd(), '.cache');
+const CACHE_DIR = path.join(process.cwd(), 'cache');
 const CACHE_FILE = path.join(CACHE_DIR, 'cache-data.json');
 
 interface CacheEntry<T> {
@@ -77,17 +77,13 @@ try {
   }
 } catch (error) {
   console.error('Error loading cache from file:', error);
-  // If there's an error, we'll continue with the default empty cache
 }
 
 // Save cache to file with error handling
 const saveCache = () => {
   try {
-    // Create a temporary file first
     const tempFile = `${CACHE_FILE}.tmp`;
     fs.writeFileSync(tempFile, JSON.stringify(cache), 'utf-8');
-    
-    // Rename the temporary file to the actual cache file
     fs.renameSync(tempFile, CACHE_FILE);
     console.log('Cache saved successfully');
   } catch (error) {
@@ -201,50 +197,66 @@ app.get('/api/pods/:podId/employees', async (req, res) => {
   }
 });
 
-// Get cached repositories
-app.get('/api/cache/repositories', (req, res) => {
-  console.log('Fetching all cached repositories');
-  
-  const repos = Object.entries(cache.repositories)
-    .map(([key, entry]) => ({
-      ...entry.data,
-      cacheKey: key
-    }));
-    console.log("Sgsdggsd", repos)
-
-  if (repos.length > 0) {
-    console.log(`Found ${repos.length} cached repositories`);
-    res.json(repos);
-  } else {
-    console.log('No cached repositories found');
-    res.status(404).json({ error: 'No cached repositories found' });
-  }
-});
-
-// Get cached commits for a repository
-app.get('/api/cache/commits/:org/:repo', (req, res) => {
-  const { org, repo } = req.params;
+// Get all cached data in a single call
+app.get('/api/cache/all-data', (req, res) => {
   const { startDate, endDate } = req.query;
-  console.log(`Fetching cached commits for ${org}/${repo}`);
-  
-  const start = startDate ? new Date(startDate as string) : subMonths(new Date(), 4);
-  const end = endDate ? new Date(endDate as string) : new Date();
+  console.log('Fetching all cached data');
 
-  const commits = Object.entries(cache.commits)
-    .filter(([key, entry]) => {
-      if (!key.startsWith(`${org}/${repo}/`)) return false;
+  try {
+    const data = {
+      repositories: {},
+      commits: {},
+      stats: {
+        totalRepos: 0,
+        totalCommits: 0,
+        organizations: new Set()
+      }
+    };
+
+    // Process repositories
+    Object.entries(cache.repositories).forEach(([key, entry]) => {
+      const [org] = key.split('/');
+      if (!data.repositories[org]) {
+        data.repositories[org] = [];
+        data.stats.organizations.add(org);
+      }
+      data.repositories[org].push(entry.data);
+      data.stats.totalRepos++;
+    });
+
+    // Process commits within date range
+    const start = startDate ? new Date(startDate as string) : subMonths(new Date(), 4);
+    const end = endDate ? new Date(endDate as string) : new Date();
+
+    Object.entries(cache.commits).forEach(([key, entry]) => {
+      if (!entry.data || !entry.data.commit) return;
+      
       const commitDate = new Date(entry.data.commit.author.date);
-      return commitDate >= start && commitDate <= end;
-    })
-    .map(([, entry]) => entry.data);
+      if (commitDate >= start && commitDate <= end) {
+        const [org, repo] = key.split('/');
+        const repoKey = `${org}/${repo}`;
+        if (!data.commits[repoKey]) {
+          data.commits[repoKey] = [];
+        }
+        data.commits[repoKey].push(entry.data);
+        data.stats.totalCommits++;
+      }
+    });
 
-  console.log(`Found ${commits.length} cached commits for ${org}/${repo}`);
-  res.json(commits);
+    // Convert stats.organizations Set to Array for JSON serialization
+    data.stats.organizations = Array.from(data.stats.organizations);
+
+    console.log(`Sending data: ${data.stats.totalRepos} repositories, ${data.stats.totalCommits} commits`);
+    res.json(data);
+  } catch (error) {
+    console.error('Error fetching all cached data:', error);
+    res.status(500).json({ error: 'Failed to fetch cached data' });
+  }
 });
 
 // Cache repositories
 app.post('/api/cache/repositories', (req, res) => {
-  const { data } = req.body;
+  const { org, data } = req.body;
 
   if (!data || !Array.isArray(data)) {
     return res.status(400).json({ error: 'Invalid repository data' });
@@ -265,7 +277,7 @@ app.post('/api/cache/repositories', (req, res) => {
 
 // Cache commits
 app.post('/api/cache/commits', (req, res) => {
-  const { repository, commits } = req.body;
+  const { repository, commits, dateRange } = req.body;
 
   if (!repository || !commits || !Array.isArray(commits)) {
     return res.status(400).json({ error: 'Invalid commit data' });
@@ -280,6 +292,11 @@ app.post('/api/cache/commits', (req, res) => {
       date: commit.commit.author.date.split('T')[0]
     };
   });
+
+  if (dateRange) {
+    const [org] = repository.split('/');
+    cache.lastCommitDates[org] = dateRange.until;
+  }
 
   saveCache();
   res.json({ success: true });
