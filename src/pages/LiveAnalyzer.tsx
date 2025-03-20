@@ -226,10 +226,17 @@ export function LiveAnalyzer() {
     }
 
     setIsCaching(true);
+    setError(null);
+    setCacheStatus({
+      type: 'commits',
+      org: trimmedOrg,
+      timestamp: new Date(),
+      count: 0,
+      source: 'Starting cache process...'
+    });
 
     try {
       await cacheOrgData(trimmedOrg, token);
-      setError(null);
       setCacheStatus({
         type: 'commits',
         org: trimmedOrg,
@@ -237,6 +244,7 @@ export function LiveAnalyzer() {
         count: 0,
         source: 'Cache Updated'
       });
+      setError('Caching complete! Please go to the Home page to view the data.');
     } catch (error) {
       console.error('Error caching data:', error);
       setError('Failed to cache organization data. Please try again.');

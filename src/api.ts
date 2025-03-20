@@ -1,8 +1,10 @@
 import axios, { AxiosError } from 'axios';
 import { Repository, Commit, Branch, Employee, PodEmployee } from './types';
-import { subMonths } from 'date-fns';
+import { subMonths, subDays, parseISO } from 'date-fns';
 
 const API_URL = 'http://localhost:3001/api';
+const CACHE_PERIOD_DAYS = 4; // Change to 120 (4 months) for production
+
 const github = axios.create({
   baseURL: 'https://api.github.com',
   headers: {
@@ -230,7 +232,23 @@ export const fetchPodEmployees = async (podIds: string[]): Promise<PodEmployee[]
 
 export const fetchOrgRepos = async (org: string, token?: string): Promise<Repository[]> => {
   console.log(`Fetching repositories for organization: ${org}`);
-  
+  const isCacheAvailable = await checkCacheServer();
+  console.log('Cache server available:', isCacheAvailable);
+
+  if (isCacheAvailable) {
+    try {
+      console.log('Checking cache for repositories');
+      const cacheResponse = await axios.get(`${API_URL}/cache/all-data`);
+      const repos = cacheResponse.data.repositories[org];
+      if (repos && repos.length > 0) {
+        console.log('Using cached repositories');
+        return repos;
+      }
+    } catch (error) {
+      console.log('Cache miss for repositories');
+    }
+  }
+
   try {
     console.log('Fetching repositories from GitHub API');
     const repos = await fetchAllPages<Repository>(
@@ -241,6 +259,17 @@ export const fetchOrgRepos = async (org: string, token?: string): Promise<Reposi
     );
     
     console.log(`Found ${repos.length} repositories`);
+    
+    if (repos.length > 0 && isCacheAvailable) {
+      try {
+        console.log('Caching repositories');
+        await axios.post(`${API_URL}/cache/repositories`, { org, data: repos });
+        console.log('Cached repositories successfully');
+      } catch (error) {
+        console.warn('Failed to cache repositories:', error);
+      }
+    }
+    
     return repos;
   } catch (error) {
     return handleApiError(error, `repositories for ${org}`);
@@ -249,7 +278,24 @@ export const fetchOrgRepos = async (org: string, token?: string): Promise<Reposi
 
 export const fetchRepoBranches = async (fullName: string, token?: string): Promise<Branch[]> => {
   console.log(`Fetching branches for repository: ${fullName}`);
-  
+  const isCacheAvailable = await checkCacheServer();
+  console.log('Cache server available:', isCacheAvailable);
+
+  if (isCacheAvailable) {
+    try {
+      console.log('Checking cache for branches');
+      const cacheResponse = await axios.get(`${API_URL}/cache/all-data`);
+      const [org, repo] = fullName.split('/');
+      const branches = cacheResponse.data.branches?.[`${org}/${repo}`];
+      if (branches && branches.length > 0) {
+        console.log('Using cached branches');
+        return branches;
+      }
+    } catch (error) {
+      console.log('Cache miss for branches');
+    }
+  }
+
   try {
     console.log('Fetching branches from GitHub API');
     const branches = await fetchAllPages<Branch>(
@@ -260,6 +306,7 @@ export const fetchRepoBranches = async (fullName: string, token?: string): Promi
     );
     
     console.log(`Found ${branches.length} branches`);
+    
     return branches;
   } catch (error) {
     return handleApiError(error, `branches for ${fullName}`);
@@ -358,14 +405,35 @@ export const cacheOrgData = async (
   token?: string
 ): Promise<void> => {
   const endDate = new Date();
-  const startDate = subMonths(endDate, 4);
+  let startDate: Date;
 
-  console.log('Caching data from', startDate, 'to', endDate);
+  try {
+    // Get the last commit date for this organization
+    const cacheResponse = await axios.get(`${API_URL}/cache/stats`);
+    const lastCommitDate = cacheResponse.data?.lastCommitDates?.[org];
+
+    if (lastCommitDate) {
+      // If we have a last commit date, start from there
+      startDate = parseISO(lastCommitDate);
+      console.log(`Continuing from last cached date: ${startDate.toISOString()}`);
+    } else {
+      // If no previous cache, start from CACHE_PERIOD_DAYS ago
+      startDate = subDays(endDate, CACHE_PERIOD_DAYS);
+      console.log(`Starting fresh ${CACHE_PERIOD_DAYS}-day cache from: ${startDate.toISOString()}`);
+    }
+  } catch (error) {
+    console.error('Error checking cache stats:', error);
+    startDate = subDays(endDate, CACHE_PERIOD_DAYS);
+  }
+
+  const BATCH_SIZE = 5; // Process 5 repos at a time
+
+  console.log(`Caching data from ${startDate.toISOString()} to ${endDate.toISOString()}`);
 
   try {
     // First, fetch and cache repositories
     const repos = await fetchOrgRepos(org, token);
-    console.log(`Caching data for ${repos.length} repositories`);
+    console.log(`Found ${repos.length} repositories to cache`);
     
     // Cache repositories
     await axios.post(`${API_URL}/cache/repositories`, {
@@ -373,26 +441,48 @@ export const cacheOrgData = async (
       data: repos
     });
     
-    // Then fetch and cache commits for each repository
-    for (const repo of repos) {
-      console.log(`Processing repository: ${repo.full_name}`);
-      const { commits, branches } = await fetchAllRepoCommits(repo, token, startDate, endDate);
+    // Process repositories in batches
+    for (let i = 0; i < repos.length; i += BATCH_SIZE) {
+      const batch = repos.slice(i, i + BATCH_SIZE);
+      console.log(`Processing batch ${Math.floor(i/BATCH_SIZE) + 1} of ${Math.ceil(repos.length/BATCH_SIZE)}`);
       
-      // Cache commits
-      if (commits.length > 0) {
+      // Process each repo in the batch concurrently
+      const batchPromises = batch.map(async (repo) => {
         try {
-          await axios.post(`${API_URL}/cache/commits`, {
-            repository: repo.full_name,
-            commits,
-            dateRange: {
-              since: startDate.toISOString(),
-              until: endDate.toISOString()
-            }
-          });
-          console.log(`Cached ${commits.length} commits for ${repo.full_name}`);
+          console.log(`Processing repository: ${repo.full_name}`);
+          const { commits, branches } = await fetchAllRepoCommits(repo, token, startDate, endDate);
+          
+          if (commits.length > 0) {
+            await axios.post(`${API_URL}/cache/commits`, {
+              repository: repo.full_name,
+              commits,
+              dateRange: {
+                since: startDate.toISOString(),
+                until: endDate.toISOString()
+              }
+            });
+            console.log(`Cached ${commits.length} commits for ${repo.full_name}`);
+            return { success: true, repo: repo.full_name, commits: commits.length };
+          }
+          return { success: true, repo: repo.full_name, commits: 0 };
         } catch (error) {
-          console.error(`Failed to cache commits for ${repo.full_name}:`, error);
+          console.error(`Failed to cache data for ${repo.full_name}:`, error);
+          return { success: false, repo: repo.full_name, error };
         }
+      });
+      
+      // Wait for batch to complete
+      const results = await Promise.allSettled(batchPromises);
+      
+      // Log batch results
+      const succeeded = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
+      const failed = results.filter(r => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.success)).length;
+      console.log(`Batch completed: ${succeeded} succeeded, ${failed} failed`);
+      
+      // Add delay between batches to avoid rate limits
+      if (i + BATCH_SIZE < repos.length) {
+        console.log('Waiting 2 seconds before next batch...');
+        await new Promise(resolve => setTimeout(resolve, 2000));
       }
     }
     
