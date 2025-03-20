@@ -31,6 +31,7 @@ interface Cache {
 }
 
 const CACHE_TTL = 1000 * 60 * 60 * 24; // 24 hours
+const COMMIT_RETENTION_MONTHS = 4; // Keep 4 months of commit history
 
 // Initialize cache with default values
 let cache: Cache = {
@@ -79,6 +80,25 @@ try {
   console.error('Error loading cache from file:', error);
 }
 
+// Clean up old commits
+const cleanupOldCommits = () => {
+  const retentionDate = subMonths(new Date(), COMMIT_RETENTION_MONTHS);
+  let removedCount = 0;
+
+  Object.entries(cache.commits).forEach(([key, entry]) => {
+    const commitDate = new Date(entry.data.commit.author.date);
+    if (commitDate < retentionDate) {
+      delete cache.commits[key];
+      removedCount++;
+    }
+  });
+
+  if (removedCount > 0) {
+    console.log(`Cleaned up ${removedCount} commits older than ${COMMIT_RETENTION_MONTHS} months`);
+    saveCache();
+  }
+};
+
 // Save cache to file with error handling
 const saveCache = () => {
   try {
@@ -90,6 +110,9 @@ const saveCache = () => {
     console.error('Error saving cache to file:', error);
   }
 };
+
+// Run cleanup every hour
+setInterval(cleanupOldCommits, 1000 * 60 * 60);
 
 // Save cache every 5 minutes and on process exit
 const saveInterval = setInterval(saveCache, 5 * 60 * 1000);
@@ -282,6 +305,9 @@ app.post('/api/cache/commits', (req, res) => {
   if (!repository || !commits || !Array.isArray(commits)) {
     return res.status(400).json({ error: 'Invalid commit data' });
   }
+
+  // Clean up old commits before adding new ones
+  cleanupOldCommits();
 
   commits.forEach(commit => {
     const key = `${repository}/${commit.sha}`;
