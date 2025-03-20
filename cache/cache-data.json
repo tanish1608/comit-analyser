@@ -1,1 +1,88 @@
-{"repositories":{"example-org/main-app":{"data":{"id":123456789,"name":"main-app","full_name":"example-org/main-app","private":false,"owner":{"login":"example-org","id":987654,"avatar_url":"https://avatars.githubusercontent.com/u/987654?v=4","type":"Organization"},"description":"Main application repository","fork":false,"created_at":"2023-01-01T00:00:00Z","updated_at":"2025-03-19T12:00:00Z","pushed_at":"2025-03-19T12:00:00Z","language":"TypeScript","default_branch":"main"},"timestamp":1710892800000,"expiresAt":1710979200000},"example-org/api-service":{"data":{"id":123456790,"name":"api-service","full_name":"example-org/api-service","private":false,"owner":{"login":"example-org","id":987654,"avatar_url":"https://avatars.githubusercontent.com/u/987654?v=4","type":"Organization"},"description":"API service repository","fork":false,"created_at":"2023-02-01T00:00:00Z","updated_at":"2025-03-19T12:00:00Z","pushed_at":"2025-03-19T12:00:00Z","language":"JavaScript","default_branch":"main"},"timestamp":1710892800000,"expiresAt":1710979200000}},"branches":{},"commits":{"example-org/main-app/abc123":{"data":{"sha":"abc123","commit":{"author":{"name":"John Doe","email":"john@example.com","date":"2025-03-19T10:00:00Z"},"message":"feat: Add new feature"},"author":{"login":"johndoe","avatar_url":"https://avatars.githubusercontent.com/u/123456?v=4"},"date":"2025-03-19"},"timestamp":1710892800000,"expiresAt":1710979200000,"date":"2025-03-19"},"example-org/main-app/def456":{"data":{"sha":"def456","commit":{"author":{"name":"Jane Smith","email":"jane@example.com","date":"2025-03-18T15:30:00Z"},"message":"fix: Resolve bug in login flow"},"author":{"login":"janesmith","avatar_url":"https://avatars.githubusercontent.com/u/123457?v=4"},"date":"2025-03-18"},"timestamp":1710892800000,"expiresAt":1710979200000,"date":"2025-03-18"},"example-org/api-service/ghi789":{"data":{"sha":"ghi789","commit":{"author":{"name":"John Doe","email":"john@example.com","date":"2025-03-19T09:15:00Z"},"message":"feat: Add new API endpoint"},"author":{"login":"johndoe","avatar_url":"https://avatars.githubusercontent.com/u/123456?v=4"},"date":"2025-03-19"},"timestamp":1710892800000,"expiresAt":1710979200000,"date":"2025-03-19"}},"employees":{"employee_johndoe":{"data":{"name":"John Doe","email":"john.doe@example.com","department":"Engineering"},"timestamp":1742434188315,"expiresAt":1742520588315},"employee_janesmith":{"data":{"name":"John Doe","email":"john.doe@example.com","department":"Engineering"},"timestamp":1742434188320,"expiresAt":1742520588320},"pod_pod-a":{"data":[{"empiId":"emp1","name":"John Doe","pod":"pod-a"},{"empiId":"emp2","name":"Jane Smith","pod":"pod-a"}],"timestamp":1742434195930,"expiresAt":1742520595930},"pod_pod-b":{"data":[{"empiId":"emp3","name":"Bob Johnson","pod":"pod-b"}],"timestamp":1742434195933,"expiresAt":1742520595933},"pod_pod-c":{"data":[],"timestamp":1742434195937,"expiresAt":1742520595937}},"lastCommitDates":{"example-org":"2025-03-19T12:00:00Z"}}
+{
+  "repositories": {
+    "example-org/repo1": {
+      "data": {
+        "id": 1,
+        "name": "repo1",
+        "full_name": "example-org/repo1"
+      },
+      "timestamp": 1710892800000,
+      "expiresAt": 1710979200000
+    },
+    "example-org/repo2": {
+      "data": {
+        "id": 2,
+        "name": "repo2",
+        "full_name": "example-org/repo2"
+      },
+      "timestamp": 1710892800000,
+      "expiresAt": 1710979200000
+    }
+  },
+  "branches": {},
+  "commits": {
+    "example-org/repo1/commit1": {
+      "data": {
+        "sha": "abc123",
+        "commit": {
+          "author": {
+            "name": "John Doe",
+            "email": "john@example.com",
+            "date": "2024-03-15T10:00:00Z"
+          },
+          "message": "Initial commit"
+        },
+        "author": {
+          "login": "johndoe",
+          "avatar_url": "https://github.com/avatar1.png"
+        }
+      },
+      "timestamp": 1710892800000,
+      "expiresAt": 1710979200000,
+      "date": "2024-03-15"
+    },
+    "example-org/repo1/commit2": {
+      "data": {
+        "sha": "def456",
+        "commit": {
+          "author": {
+            "name": "Jane Smith",
+            "email": "jane@example.com",
+            "date": "2024-03-16T15:30:00Z"
+          },
+          "message": "Update README"
+        },
+        "author": {
+          "login": "janesmith",
+          "avatar_url": "https://github.com/avatar2.png"
+        }
+      },
+      "timestamp": 1710892800000,
+      "expiresAt": 1710979200000,
+      "date": "2024-03-16"
+    }
+  },
+  "employees": {
+    "employee_johndoe": {
+      "data": {
+        "name": "John Doe",
+        "email": "john@example.com",
+        "department": "Engineering"
+      },
+      "timestamp": 1710892800000,
+      "expiresAt": 1710979200000
+    },
+    "employee_janesmith": {
+      "data": {
+        "name": "Jane Smith",
+        "email": "jane@example.com",
+        "department": "Engineering"
+      },
+      "timestamp": 1710892800000,
+      "expiresAt": 1710979200000
+    }
+  },
+  "lastCommitDates": {
+    "example-org": "2024-03-16T15:30:00Z"
+  }
+}
